@@ -19,20 +19,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import java.util.*
 
-// --- 1. هيكل البيانات المحاسبي المحدث بناءً على معادلاتك ---
+// --- 1. هيكل البيانات والمعادلات (حسب طلبك الأخير) ---
 
 data class Transaction(
     val farmName: String,
     val type: String,
     val quantity: Double,
     val unitPrice: Double,
-    val date: String = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+    val date: String = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 ) {
-    // معادلة إكسل للمدخول: =IF(OR(C3="بيض تحميل"; C3="مدخول"); D3*E3; 0)
+    // معادلة المدخول: =IF(OR(C3="بيض تحميل"; C3="مدخول"); D3*E3; 0)
     val incomeValue: Double 
         get() = if (type == "بيض تحميل" || type == "مدخول") quantity * unitPrice else 0.0
 
-    // معادلة إكسل للمصروف: =IF(OR(ISNUMBER(SEARCH("بيض"; C3)); ISNUMBER(SEARCH("مدخول"; C3))); 0; D3*E3)
+    // معادلة المصروف: =IF(OR(ISNUMBER(SEARCH("بيض"; C3)); ISNUMBER(SEARCH("مدخول"; C3))); 0; D3*E3)
     val expenseValue: Double 
         get() = if (type.contains("بيض") || type == "مدخول") 0.0 else quantity * unitPrice
 }
@@ -47,7 +47,7 @@ data class FarmData(
     var totalIncome: Double = 0.0
 )
 
-// --- 2. المحرك المحاسبي الذكي ---
+// --- 2. المحرك المحاسبي ---
 
 class ArishLogic {
     val feedTonPrice = 387.5
@@ -69,19 +69,16 @@ class ArishLogic {
 
     fun addMovement(farm: String, type: String, qty: Double, price: Double) {
         transactions.add(Transaction(farm, type, qty, price))
-        updateFarmCalculations()
+        updateCalculations()
     }
 
-    private fun updateFarmCalculations() {
+    private fun updateCalculations() {
         farms.forEach { farm ->
             val farmMoves = transactions.filter { it.farmName == farm.name }
-            
             farm.deaths = farmMoves.filter { it.type == "وفيات" }.sumOf { it.quantity }.toInt()
-            
             val prod = farmMoves.filter { it.type == "بيض انتاج" }.sumOf { it.quantity }
             val load = farmMoves.filter { it.type == "بيض تحميل" }.sumOf { it.quantity }
             farm.eggStock = prod - load
-            
             farm.totalIncome = farmMoves.sumOf { it.incomeValue }
             farm.totalExpenses = farmMoves.sumOf { it.expenseValue }
             farm.totalNetProfit = farm.totalIncome - farm.totalExpenses
@@ -89,12 +86,12 @@ class ArishLogic {
     }
 
     fun getSuperRemaining(): Double {
-        val consumedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
-        return initialSuperStock - (consumedFeed / tonToBagRatio)
+        val usedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
+        return initialSuperStock - (usedFeed / tonToBagRatio)
     }
 }
 
-// --- 3. الواجهات الرسومية المتطورة ---
+// --- 3. واجهة المستخدم ---
 
 class MainActivity : ComponentActivity() {
     private val logic = ArishLogic()
@@ -102,15 +99,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                MainAppStructure(logic)
+                MainAppFrame(logic)
             }
         }
     }
 }
 
 @Composable
-fun MainAppStructure(logic: ArishLogic) {
-    var selectedTab by remember { mutableStateOf(0) }
+fun MainAppFrame(logic: ArishLogic) {
+    var tab by remember { mutableStateOf(0) }
     val navy = Color(0xFF0D47A1)
 
     Scaffold(
@@ -120,9 +117,9 @@ fun MainAppStructure(logic: ArishLogic) {
                 val icons = listOf(Icons.Default.Dashboard, Icons.Default.ReceiptLong, Icons.Default.Inventory, Icons.Default.MenuBook)
                 menu.forEachIndexed { index, label ->
                     NavigationBarItem(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        icon = { Icon(icons[index], null, tint = if(selectedTab == index) Color.Yellow else Color.White) },
+                        selected = tab == index,
+                        onClick = { tab = index },
+                        icon = { Icon(icons[index], null, tint = if(tab == index) Color.Yellow else Color.White) },
                         label = { Text(label, color = Color.White, fontSize = 10.sp) }
                     )
                 }
@@ -130,18 +127,18 @@ fun MainAppStructure(logic: ArishLogic) {
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize().background(Color(0xFFF0F4F8))) {
-            when (selectedTab) {
-                0 -> Dashboard(logic)
+            when (tab) {
+                0 -> DashboardScreen(logic)
                 1 -> MovementLedger(logic)
                 2 -> InventoryStats(logic)
-                3 -> HelpCenter()
+                3 -> HelpGuide()
             }
         }
     }
 }
 
 @Composable
-fun Dashboard(logic: ArishLogic) {
+fun DashboardScreen(logic: ArishLogic) {
     LazyColumn(modifier = Modifier.padding(16.dp)) {
         item {
             Text("نظام نهر اسطوان المحاسبي", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
@@ -160,11 +157,11 @@ fun Dashboard(logic: ArishLogic) {
                             color = if(farm.totalNetProfit >= 0) Color(0xFF2E7D32) else Color.Red, 
                             fontWeight = FontWeight.ExtraBold)
                     }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp), thickness = 0.5.dp)
+                    DividerLine()
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-                        StatChip("الطيور", "${farm.initialBirds - farm.deaths}", Icons.Default.Pets, Color.DarkGray)
-                        StatChip("البيض", "${farm.eggStock}", Icons.Default.Egg, Color(0xFFE65100))
-                        StatChip("المدخول", "${farm.totalIncome}", Icons.Default.TrendingUp, Color(0xFF2E7D32))
+                        StatItem("طيور", "${farm.initialBirds - farm.deaths}", Icons.Default.Pets, Color.DarkGray)
+                        StatItem("بيض", "${farm.eggStock}", Icons.Default.Egg, Color(0xFFE65100))
+                        StatItem("مصروف", "${farm.totalExpenses}", Icons.Default.TrendingDown, Color.Red)
                     }
                 }
             }
@@ -173,62 +170,35 @@ fun Dashboard(logic: ArishLogic) {
 }
 
 @Composable
-fun StatChip(label: String, value: String, icon: ImageVector, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, modifier = Modifier.size(16.dp), tint = color)
-        Text(value, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = color)
-        Text(label, fontSize = 9.sp, color = Color.Gray)
-    }
-}
-
-@Composable
 fun MovementLedger(logic: ArishLogic) {
     var qtyText by remember { mutableStateOf("") }
     var selectedFarm by remember { mutableStateOf(logic.farms[0].name) }
     var selectedType by remember { mutableStateOf("علف") }
-    var expandedFarm by remember { mutableStateOf(false) }
-    var expandedType by remember { mutableStateOf(false) }
+    var expF by remember { mutableStateOf(false) }
+    var expT by remember { mutableStateOf(false) }
 
     val categories = listOf("علف", "بيض انتاج", "بيض تحميل", "وفيات", "مدخول", "دواء", "نثريات")
 
     Column(modifier = Modifier.padding(16.dp)) {
         Text("تسجيل حركة يومية", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        
         Card(modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
-                // المزرعة
                 Box {
-                    OutlinedButton(onClick = { expandedFarm = true }, Modifier.fillMaxWidth()) {
-                        Text("المزرعة: $selectedFarm")
-                    }
-                    DropdownMenu(expanded = expandedFarm, onDismissRequest = { expandedFarm = false }) {
-                        logic.farms.forEach { f ->
-                            DropdownMenuItem(text = { Text(f.name) }, onClick = { selectedFarm = f.name; expandedFarm = false })
-                        }
+                    OutlinedButton(onClick = { expF = true }, Modifier.fillMaxWidth()) { Text("المزرعة: $selectedFarm") }
+                    DropdownMenu(expanded = expF, onDismissRequest = { expF = false }) {
+                        logic.farms.forEach { f -> DropdownMenuItem(text = { Text(f.name) }, onClick = { selectedFarm = f.name; expF = false }) }
                     }
                 }
-                
-                // الصنف والكمية
                 Row(Modifier.padding(vertical = 8.dp)) {
                     Box(Modifier.weight(1.2f)) {
-                        OutlinedButton(onClick = { expandedType = true }, Modifier.fillMaxWidth()) {
-                            Text(selectedType)
-                        }
-                        DropdownMenu(expanded = expandedType, onDismissRequest = { expandedType = false }) {
-                            categories.forEach { c ->
-                                DropdownMenuItem(text = { Text(c) }, onClick = { selectedType = c; expandedType = false })
-                            }
+                        OutlinedButton(onClick = { expT = true }, Modifier.fillMaxWidth()) { Text(selectedType) }
+                        DropdownMenu(expanded = expT, onDismissRequest = { expT = false }) {
+                            categories.forEach { c -> DropdownMenuItem(text = { Text(c) }, onClick = { selectedType = c; expT = false }) }
                         }
                     }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = qtyText,
-                        onValueChange = { qtyText = it },
-                        label = { Text("الكمية") },
-                        modifier = Modifier.weight(1f)
-                    )
+                    OutlinedTextField(value = qtyText, onValueChange = { qtyText = it }, label = { Text("الكمية") }, modifier = Modifier.weight(1f))
                 }
-
                 Button(
                     onClick = {
                         val q = qtyText.toDoubleOrNull() ?: 0.0
@@ -241,7 +211,6 @@ fun MovementLedger(logic: ArishLogic) {
                 ) { Text("تأكيد وحفظ") }
             }
         }
-        
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.background(Color(0xFF0D47A1)).padding(8.dp).fillMaxWidth()) {
@@ -254,13 +223,10 @@ fun MovementLedger(logic: ArishLogic) {
                 Row(Modifier.padding(8.dp).fillMaxWidth()) {
                     Text(tr.farmName, Modifier.weight(1f), fontSize = 13.sp)
                     Text(tr.type, Modifier.weight(1f), fontSize = 13.sp)
-                    val displayVal = if(tr.incomeValue > 0) tr.incomeValue else tr.expenseValue
-                    Text("${String.format("%.2f", displayVal)}$", 
-                        Modifier.weight(0.7f), 
-                        color = if(tr.incomeValue > 0) Color(0xFF2E7D32) else Color.Red,
-                        fontWeight = FontWeight.Bold)
+                    val disp = if(tr.incomeValue > 0) tr.incomeValue else tr.expenseValue
+                    Text("${String.format("%.2f", disp)}$", Modifier.weight(0.7f), color = if(tr.incomeValue > 0) Color(0xFF2E7D32) else Color.Red, fontWeight = FontWeight.Bold)
                 }
-                HorizontalDivider(thickness = 0.5.dp)
+                DividerLine()
             }
         }
     }
@@ -269,43 +235,42 @@ fun MovementLedger(logic: ArishLogic) {
 @Composable
 fun InventoryStats(logic: ArishLogic) {
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("المخازن المركزية", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("المخازن", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(20.dp))
-        BigStatCard("رصيد Super (كيس)", String.format("%.2f", logic.getSuperRemaining()), Color(0xFFE65100))
-        BigStatCard("إجمالي البيض (كرتونة)", logic.farms.sumOf { it.eggStock }.toString(), Color(0xFF004D40))
-        
-        Spacer(Modifier.height(20.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))) {
-            Text("ملاحظة: معادلة العلف تعتمد على خصم كيس سوبر لكل 20 كيس علف مستهلك فعلياً في المزارع.", 
-                modifier = Modifier.padding(16.dp), fontSize = 14.sp)
-        }
+        BigStat("رصيد Super (كيس)", String.format("%.2f", logic.getSuperRemaining()), Color(0xFFE65100))
+        BigStat("إجمالي البيض (كرتونة)", logic.farms.sumOf { it.eggStock }.toString(), Color(0xFF004D40))
     }
 }
 
 @Composable
-fun BigStatCard(title: String, value: String, color: Color) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = color)) {
+fun StatItem(label: String, value: String, icon: ImageVector, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, modifier = Modifier.size(16.dp), tint = color)
+        Text(value, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = color)
+        Text(label, fontSize = 9.sp, color = Color.Gray)
+    }
+}
+
+@Composable
+fun BigStat(t: String, v: String, c: Color) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = c)) {
         Column(Modifier.padding(24.dp), Alignment.CenterHorizontally) {
-            Text(title, color = Color.White, fontSize = 15.sp)
-            Text(value, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+            Text(t, color = Color.White, fontSize = 15.sp)
+            Text(v, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
-fun HelpCenter() {
-    val items = listOf(
-        "المدخول الجديد" to "تمت إضافة خيار 'مدخول' للقائمة، وهو يحسب مباشرة في الأرباح ولا يعتبر مصروفاً.",
-        "قاعدة الوفيات" to "تخصم أوتوماتيكياً من العدد الأساسي المسجل لكل مزرعة بمجرد إدخالها في السجل.",
-        "المزامنة السحابية" to "يمكنك ربط التطبيق بملف OneDrive عبر الإعدادات لمزامنة الجداول بين الهاتف والكمبيوتر."
-    )
+fun HelpGuide() {
+    val items = listOf("المدخول" to "يشمل بيض التحميل وكلمة 'مدخول'.", "المصروف" to "كل شيء عدا البيض والمدخول.")
     LazyColumn(Modifier.padding(16.dp)) {
-        item { Text("دليل المستخدم والمحاسبة", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        items(items) { (t, d) ->
-            Spacer(Modifier.height(16.dp))
-            Text(t, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
-            Text(d, fontSize = 14.sp)
-            HorizontalDivider(Modifier.padding(top = 8.dp))
+        items(items) { i ->
+            Text(i.first, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
+            Text(i.second, fontSize = 14.sp)
+            DividerLine()
         }
     }
 }
+
+@Composable fun DividerLine() { Box(Modifier.fillMaxWidth().height(1.dp).background(Color.LightGray).padding(vertical = 8.dp)) }
