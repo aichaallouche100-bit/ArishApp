@@ -19,7 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import java.util.*
 
-// --- 1. هيكل البيانات والمعادلات (حسب طلبك الأخير) ---
+// --- 1. هيكل البيانات والمعادلات (حسب طلبك: المدخول والمصروف) ---
 
 data class Transaction(
     val farmName: String,
@@ -28,11 +28,11 @@ data class Transaction(
     val unitPrice: Double,
     val date: String = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 ) {
-    // معادلة المدخول: =IF(OR(C3="بيض تحميل"; C3="مدخول"); D3*E3; 0)
+    // معادلة المدخول المحدثة: بيض تحميل أو مدخول
     val incomeValue: Double 
         get() = if (type == "بيض تحميل" || type == "مدخول") quantity * unitPrice else 0.0
 
-    // معادلة المصروف: =IF(OR(ISNUMBER(SEARCH("بيض"; C3)); ISNUMBER(SEARCH("مدخول"; C3))); 0; D3*E3)
+    // معادلة المصروف المحدثة: يستثني أي صنف فيه "بيض" أو "مدخول"
     val expenseValue: Double 
         get() = if (type.contains("بيض") || type == "مدخول") 0.0 else quantity * unitPrice
 }
@@ -47,7 +47,7 @@ data class FarmData(
     var totalIncome: Double = 0.0
 )
 
-// --- 2. المحرك المحاسبي ---
+// --- 2. المحرك المحاسبي الذكي ---
 
 class ArishLogic {
     val feedTonPrice = 387.5
@@ -86,8 +86,8 @@ class ArishLogic {
     }
 
     fun getSuperRemaining(): Double {
-        val usedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
-        return initialSuperStock - (usedFeed / tonToBagRatio)
+        val consumedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
+        return initialSuperStock - (consumedFeed / tonToBagRatio)
     }
 }
 
@@ -254,7 +254,8 @@ fun StatItem(label: String, value: String, icon: ImageVector, color: Color) {
 @Composable
 fun BigStat(t: String, v: String, c: Color) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = c)) {
-        Column(Modifier.padding(24.dp), Alignment.CenterHorizontally) {
+        // تم تصحيح الخطأ هنا (إضافة horizontalAlignment = ...)
+        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(t, color = Color.White, fontSize = 15.sp)
             Text(v, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
         }
@@ -263,9 +264,11 @@ fun BigStat(t: String, v: String, c: Color) {
 
 @Composable
 fun HelpGuide() {
-    val items = listOf("المدخول" to "يشمل بيض التحميل وكلمة 'مدخول'.", "المصروف" to "كل شيء عدا البيض والمدخول.")
-    LazyColumn(Modifier.padding(16.dp)) {
-        items(items) { i ->
+    val helpItems = listOf("المدخول" to "يشمل بيض التحميل وكلمة 'مدخول'.", "المصروف" to "كل شيء عدا البيض والمدخول.")
+    LazyColumn(modifier = Modifier.padding(16.dp)) {
+        item { Text("دليل المحاسبة", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+        items(helpItems) { i ->
+            Spacer(Modifier.height(16.dp))
             Text(i.first, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
             Text(i.second, fontSize = 14.sp)
             DividerLine()
@@ -273,4 +276,4 @@ fun HelpGuide() {
     }
 }
 
-@Composable fun DividerLine() { Box(Modifier.fillMaxWidth().height(1.dp).background(Color.LightGray).padding(vertical = 8.dp)) }
+@Composable fun DividerLine() { Box(Modifier.fillMaxWidth().height(1.dp).background(Color.LightGray)) }
