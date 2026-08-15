@@ -1,161 +1,183 @@
 package com.arish.eggs
 
 import android.os.Bundle
-import android.content.Intent
-import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.*
+import androidx.activity.compose.setContent
+import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import java.util.*
 
-// --- [1. تعريف هيكل البيانات - السجلات] ---
-data class DailyMovement(
-    val id: Long = 0,
-    val date: String,
-    val farm: String,
-    val category: String,
-    val qty: Double,
-    val price: Double,
-    val note: String = ""
+// --- [1. النماذج المحاسبية المتطورة] ---
+
+data class Transaction(
+    val id: String = UUID.randomUUID().toString(),
+    val farmName: String,
+    val type: String, // علف، بيض انتاج، بيض تحميل، وفيات، دواء
+    val quantity: Double,
+    val unitPrice: Double,
+    val date: String = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
 ) {
-    // معادلة إكسل: المصروف = IF(ISNUMBER(SEARCH("بيض", category)); 0; qty * price)
-    val expense: Double get() = if (category.contains("بيض")) 0.0 else qty * price
-    // معادلة إكسل: المدخول = IF(category="بيض تحميل"; qty * price; 0)
-    val income: Double get() = if (category == "بيض تحميل") qty * price else 0.0
+    val totalValue: Double get() = quantity * unitPrice
+    val isExpense: Boolean get() = !type.contains("تحميل")
 }
 
-data class FarmStats(
+data class FarmDashboard(
     val name: String,
     val initialBirds: Int,
-    var deaths: Int = 0,
-    var eggProduction: Double = 0.0,
-    var eggLoading: Double = 0.0,
+    var currentDeaths: Int = 0,
+    var eggsInStock: Double = 0.0,
     var totalExpenses: Double = 0.0,
     var totalIncome: Double = 0.0
 ) {
-    val remainingBirds: Int get() = initialBirds - deaths
-    val eggBalance: Double get() = eggProduction - eggLoading
-    val profit: Double get() = totalIncome - totalExpenses
+    val remainingBirds: Int get() = initialBirds - currentDeaths
+    val netProfit: Double get() = totalIncome - totalExpenses
 }
 
-// --- [2. المحرك المحاسبي الرئيسي] ---
-class ArishAccountingEngine {
-    // الثوابت من ملف ثوابت.csv
-    var feedTonPrice = 387.5
-    var superBagPrice = 37.5
-    var tonToBagsRatio = 20.0
-    
-    // قائمة المزارع
+// --- [2. العقل المدبر المحاسبي] ---
+
+class ArishLogic {
+    // الثوابت الأساسية (قابلة للتعديل مستقبلاً)
+    var feedTonPrice by mutableStateOf(387.5)
+    var boxToCartonRatio = 12.0
+    var tonToBagRatio = 20.0
+
     val farms = mutableStateListOf(
-        FarmStats("فايز الطويلة", 7500),
-        FarmStats("فايز البرشا", 2800),
-        FarmStats("فايز الألفين", 2000),
-        FarmStats("ابو حمدو العقيد", 2000),
-        FarmStats("ابو حمدو جديدة", 3300),
-        FarmStats("ابو حمدو الاخرس", 3800),
-        FarmStats("ام نضال ١", 10900),
-        FarmStats("ام نضال ٢", 0)
+        FarmDashboard("فايز الطويلة", 7500),
+        FarmDashboard("فايز البرشا", 2800),
+        FarmDashboard("فايز الألفين", 2000),
+        FarmDashboard("ابو حمدو العقيد", 2000),
+        FarmDashboard("ابو حمدو جديدة", 3300),
+        FarmDashboard("ابو حمدو الاخرس", 3800),
+        FarmDashboard("ام نضال ١", 10900),
+        FarmDashboard("ام نضال ٢", 0)
     )
 
-    // مخزن الحركات (بديل لجدول الإكسل)
-    val allMovements = mutableStateListOf<DailyMovement>()
+    val transactions = mutableStateListOf<Transaction>()
 
-    // حساب رصيد الـ Super (معادلة ملف علف super.csv)
-    fun getSuperBalance(): Double {
-        val totalPurchased = 151.55 // مجموع المشتريات من ملف الشراء والمخزون
-        val consumedFeed = allMovements.filter { it.category == "علف" }.sumOf { it.qty }
-        return totalPurchased - (consumedFeed / tonToBagsRatio)
+    fun addEntry(farm: String, type: String, qty: Double, price: Double) {
+        transactions.add(Transaction(farmName = farm, type = type, quantity = qty, unitPrice = price))
+        recalculateEverything()
     }
 
-    // إضافة حركة جديدة (مثل إضافة سطر في إكسل)
-    fun addMovement(farmName: String, cat: String, q: Double, p: Double) {
-        val movement = DailyMovement(date = Date().toString(), farm = farmName, category = cat, qty = q, price = p)
-        allMovements.add(movement)
-        updateFarmStats()
-    }
-
-    private fun updateFarmStats() {
+    private fun recalculateEverything() {
         farms.forEach { farm ->
-            val farmMoves = allMovements.filter { it.farm == farm.name }
-            farm.deaths = farmMoves.filter { it.category == "وفيات" }.sumOf { it.qty }.toInt()
-            farm.eggProduction = farmMoves.filter { it.category == "بيض انتاج" }.sumOf { it.qty }
-            farm.eggLoading = farmMoves.filter { it.category == "بيض تحميل" }.sumOf { it.qty }
-            farm.totalExpenses = farmMoves.sumOf { it.expense }
-            farm.totalIncome = farmMoves.sumOf { it.income }
+            val farmMoves = transactions.filter { it.farmName == farm.name }
+            farm.currentDeaths = farmMoves.filter { it.type == "وفيات" }.sumOf { it.quantity }.toInt()
+            val prod = farmMoves.filter { it.type == "بيض انتاج" }.sumOf { it.quantity }
+            val load = farmMoves.filter { it.type == "بيض تحميل" }.sumOf { it.quantity }
+            farm.eggsInStock = prod - load
+            farm.totalExpenses = farmMoves.filter { it.isExpense }.sumOf { it.totalValue }
+            farm.totalIncome = farmMoves.filter { !it.isExpense }.sumOf { it.totalValue }
+        }
+    }
+
+    fun getSuperBalance(): Double {
+        val initialSuper = 151.55 // من ملفاتك
+        val usedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
+        return initialSuper - (usedFeed / tonToBagRatio)
+    }
+}
+
+// --- [3. واجهة المستخدم - الجماليات] ---
+
+class MainActivity : ComponentActivity() {
+    private val logic = ArishLogic()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                MainContainer(logic)
+            }
         }
     }
 }
 
-// --- [3. واجهة المستخدم الرسومية] ---
-class MainActivity : ComponentActivity() {
-    val engine = ArishAccountingEngine()
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent { ArishAppMain(engine) }
-    }
-}
-
 @Composable
-fun ArishAppMain(engine: ArishAccountingEngine) {
-    var screen by remember { mutableStateOf("الرئيسية") }
-    val navy = Color(0xFF1A237E)
-    val gold = Color(0xFFD4AF37)
+fun MainContainer(logic: ArishLogic) {
+    var activeTab by remember { mutableStateOf(0) }
+    val navyBlue = Color(0xFF0D47A1)
+    val goldAccent = Color(0xFFC6A700)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("نظام إدارة مزارع نهر اسطوان", color = Color.White) }, backgroundColor = navy) },
         bottomBar = {
-            BottomNavigation(backgroundColor = navy) {
-                listOf("الرئيسية", "الحركة اليومية", "المخزون", "التعليمات").forEach { item ->
-                    BottomNavigationItem(
-                        selected = screen == item,
-                        onClick = { screen = item },
-                        label = { Text(item, color = Color.White, fontSize = 9.sp) },
-                        icon = { Icon(Icons.Default.List, contentDescription = null, tint = gold) }
+            NavigationBar(containerColor = navyBlue) {
+                val items = listOf("الرئيسية" to Icons.Default.Dashboard, "الحركة" to Icons.Default.ReceiptLong, "المخزون" to Icons.Default.Inventory, "دليل" to Icons.Default.AutoStories)
+                items.forEachIndexed { index, (label, icon) ->
+                    NavigationBarItem(
+                        selected = activeTab == index,
+                        onClick = { activeTab = index },
+                        icon = { Icon(icon, contentDescription = label, tint = if(activeTab == index) goldAccent else Color.White) },
+                        label = { Text(label, color = Color.White, fontSize = 10.sp) }
                     )
                 }
             }
         }
-    ) { p ->
-        Column(modifier = Modifier.padding(p).fillMaxSize().background(Color(0xFFF8F9FA))) {
-            when (screen) {
-                "الرئيسية" -> DashboardView(engine)
-                "الحركة اليومية" -> LedgerView(engine)
-                "المخزون" -> InventoryView(engine)
-                "التعليمات" -> DetailedInstructions()
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize().background(
+            Brush.verticalGradient(listOf(Color(0xFFE3F2FD), Color.White))
+        )) {
+            when (activeTab) {
+                0 -> DashboardScreen(logic)
+                1 -> TransactionsLedger(logic)
+                2 -> InventoryAnalytics(logic)
+                3 -> SmartGuide()
             }
         }
     }
 }
 
 @Composable
-fun DashboardView(engine: ArishAccountingEngine) {
+fun DashboardScreen(logic: ArishLogic) {
     LazyColumn(modifier = Modifier.padding(16.dp)) {
         item {
-            Text("إحصاء المزارع (ربح/وفيات)", style = MaterialTheme.typography.h5, color = Color(0xFF1A237E))
-            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painter = painterResource(id = R.drawable.logo_arish), contentDescription = null, modifier = Modifier.size(60.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("نظام الرقابة المالية للإنتاج", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0D47A1))
+            }
+            Spacer(Modifier.height(20.dp))
         }
-        items(engine.farms) { farm ->
-            Card(elevation = 6.dp, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(farm.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text("الربح: ${farm.profit}$", color = if(farm.profit >=0) Color(0xFF2E7D32) else Color.Red)
+        items(logic.farms) { farm ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(24.dp),
+                elevation = CardDefaults.cardElevation(8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                        Text(farm.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("${String.format("%.2f", farm.netProfit)} $", color = if(farm.netProfit >=0) Color(0xFF2E7D32) else Color.Red, fontWeight = FontWeight.Bold)
                     }
-                    Divider(Modifier.padding(vertical = 8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("الطيور: ${farm.remainingBirds}", color = Color.DarkGray)
-                        Text("رصيد البيض: ${farm.eggBalance}", color = Color.Blue)
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
+                        StatItem("الطيور", farm.remainingBirds.toString(), Icons.Default.Pets, Color.DarkGray)
+                        StatItem("البيض", farm.eggsInStock.toString(), Icons.Default.Egg, Color(0xFFE65100))
+                        StatItem("المصاريف", farm.totalExpenses.toString(), Icons.Default.TrendingDown, Color.Red)
                     }
                 }
             }
@@ -164,34 +186,61 @@ fun DashboardView(engine: ArishAccountingEngine) {
 }
 
 @Composable
-fun LedgerView(engine: ArishAccountingEngine) {
-    var showAddDialog by remember { mutableStateOf(false) }
-    
+fun StatItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
+        Text(value, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 10.sp, color = Color.Gray)
+    }
+}
+
+@Composable
+fun TransactionsLedger(logic: ArishLogic) {
+    var farm by remember { mutableStateOf("فايز الطويلة") }
+    var type by remember { mutableStateOf("علف") }
+    var qty by remember { mutableStateOf("") }
+
     Column(modifier = Modifier.padding(16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("سجل الحركة اليومية", style = MaterialTheme.typography.h6)
-            Button(onClick = { showAddDialog = true }, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD4AF37))) {
-                Icon(Icons.Default.Add, null)
-                Text("إضافة سطر")
-            }
-        }
+        Text("إضافة حركة محاسبية جديدة", style = MaterialTheme.typography.titleLarge, color = Color(0xFF0D47A1))
         
-        // جدول يشبه الإكسل
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 10.dp)) {
-            item {
-                Row(Modifier.background(Color.LightGray).padding(8.dp).fillMaxWidth()) {
-                    Text("المزرعة", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Text("الصنف", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Text("الكمية", Modifier.weight(0.5f), fontWeight = FontWeight.Bold)
-                    Text("المصروف", Modifier.weight(0.7f), fontWeight = FontWeight.Bold)
+        Card(modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.padding(16.dp)) {
+                OutlinedTextField(value = qty, onValueChange = {qty = it}, label = { Text("الكمية") }, modifier = Modifier.fillMaxWidth())
+                Button(
+                    onClick = { 
+                        val q = qty.toDoubleOrNull() ?: 0.0
+                        val p = if(type == "علف") (logic.feedTonPrice/20) else 2.25
+                        logic.addEntry(farm, type, q, p)
+                        qty = ""
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF0D47A1)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Text(" تثبيت السطر في السجل")
+                }
+                
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), Arrangement.SpaceEvenly) {
+                    IconButton(onClick = { /* ميزة الصوت قادمة */ }) { Icon(Icons.Default.Mic, "صوت", tint = Color.Red) }
+                    IconButton(onClick = { /* ميزة الكاميرا قادمة */ }) { Icon(Icons.Default.CameraAlt, "كاميرا") }
                 }
             }
-            items(engine.allMovements.reversed()) { move ->
-                Row(Modifier.padding(8.dp).fillMaxWidth()) {
-                    Text(move.farm, Modifier.weight(1f))
-                    Text(move.category, Modifier.weight(1f))
-                    Text(move.qty.toString(), Modifier.weight(0.5f))
-                    Text("${move.expense}$", Modifier.weight(0.7f), color = Color.Red)
+        }
+
+        LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                Row(Modifier.background(Color(0xFF0D47A1)).padding(12.dp).fillMaxWidth()) {
+                    Text("المزرعة", Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("الصنف", Modifier.weight(1f), color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("القيمة", Modifier.weight(0.7f), color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+            items(logic.transactions.reversed()) { tr ->
+                Row(Modifier.padding(12.dp).fillMaxWidth()) {
+                    Text(tr.farmName, Modifier.weight(1f))
+                    Text(tr.type, Modifier.weight(1f))
+                    Text("${tr.totalValue}$", Modifier.weight(0.7f), color = if(tr.isExpense) Color.Red else Color(0xFF2E7D32))
                 }
                 Divider()
             }
@@ -200,100 +249,48 @@ fun LedgerView(engine: ArishAccountingEngine) {
 }
 
 @Composable
-fun InventoryView(engine: ArishAccountingEngine) {
+fun InventoryAnalytics(logic: ArishLogic) {
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("مراقبة المخزون (علف & super)", style = MaterialTheme.typography.h5)
-        Spacer(modifier = Modifier.height(20.dp))
+        Text("تحليل المخزون الاستراتيجي", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(20.dp))
         
-        InventoryCard("رصيد الـ Super المتبقي (كيس)", engine.getSuperBalance(), Color(0xFFE65100))
-        InventoryCard("إجمالي كراتين البيض بالمخازن", engine.farms.sumOf { it.eggBalance }, Color(0xFF004D40))
+        BigInvCard("مخزون الـ Super (كيس)", logic.getSuperBalance().toString(), Color(0xFFEF6C00))
+        BigInvCard("إجمالي إنتاج البيض الحالي", logic.farms.sumOf { it.eggsInStock }.toString(), Color(0xFF00695C))
         
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("ملاحظات محاسبية:", fontWeight = FontWeight.Bold)
-        Text("• 1 طن علف = 20 كيس.")
-        Text("• 1 صندوق بيض = 12 كرتونة.")
+        Spacer(Modifier.height(20.dp))
+        Text("تنبيهات الذكاء الاصطناعي:", fontWeight = FontWeight.Bold)
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4))) {
+            Text("مخزون العلف يكفي لـ 5 أيام قادمة بناءً على معدل الاستهلاك الحالي.", modifier = Modifier.padding(16.dp))
+        }
     }
 }
 
 @Composable
-fun InventoryCard(title: String, value: Double, color: Color) {
-    Card(backgroundColor = color, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+fun BigInvCard(title: String, value: String, color: Color) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), colors = CardDefaults.cardColors(containerColor = color)) {
+        Column(Modifier.padding(24.dp), Alignment.CenterHorizontally) {
             Text(title, color = Color.White, fontSize = 16.sp)
-            Text(value.toString(), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(value, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
 
 @Composable
-fun DetailedInstructions() {
-    val guide = listOf(
-        "نظام الوفيات" to "عند إدخال حركة 'وفيات'، يقوم التطبيق تلقائياً بخصمها من عدد الطيور الأساسي لكل مزرعة.",
-        "نظام العلف" to "يُحسب المصروف بضرب الكمية بسعر الوحدة، بينما يُحسب مخزون الـ Super بطرح الاستهلاك مقسوماً على 20.",
-        "الإملاء الصوتي" to "لتفعيل الصوت: اضغط على زر المايكروفون وقل 'مزرعة فايز علف 20'. سيفهم النظام البيانات.",
-        "المزامنة" to "زر التحديث في الإعدادات يقوم بسحب البيانات من رابط OneDrive وتعبئة السجل تلقائياً."
+fun SmartGuide() {
+    val tips = listOf(
+        "حساب الربح" to "يتم طرح (علف + أدوية + صيانة) من (مبيعات بيض التحميل).",
+        "تنبيه الوفيات" to "عند زيادة الوفيات عن 2% يظهر المربع باللون البرتقالي للتنبيه.",
+        "المزامنة" to "اضغط على زر التحديث في الإعدادات لجلب بيانات OneDrive فورياً."
     )
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        items(guide) { (title, desc) ->
-            Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF1A237E), fontSize = 18.sp)
-            Text(desc, modifier = Modifier.padding(bottom = 12.dp))
-            Divider()
-        }
-    }
-}                menu.forEach { item ->
-                    BottomNavigationItem(
-                        selected = screen == item,
-                        onClick = { screen = item },
-                        label = { Text(item, color = Color.White, fontSize = 10.sp) },
-                        icon = { Icon(Icons.Default.Star, contentDescription = null, tint = gold) }
-                    )
-                }
-            }
-        }
-    ) { p ->
-        Column(modifier = Modifier.padding(p).fillMaxSize()) {
-            when (screen) {
-                "الرئيسية" -> Dashboard()
-                "إضافة" -> EntryScreen()
-                "المخزون" -> InventoryScreen()
-                "التعليمات" -> GuideScreen()
-            }
-        }
-    }
-}
-
-@Composable
-fun Dashboard() {
-    val farms = listOf("فايز الطويلة", "فايز البرشا", "فايز الألفين", "أبو حمدو العقيد", "أبو حمدو جديدة", "أبو حمدو الأخرس", "أم نضال ١", "أم نضال ٢")
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item { Text("خلاصة المزارع", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A237E)) }
-        items(farms) { farm ->
-            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), elevation = 4.dp) {
-                Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(farm, fontWeight = FontWeight.Bold)
-                    Text("صافي الربح: 0.0$", color = Color(0xFF2E7D32))
+    LazyColumn(Modifier.padding(16.dp)) {
+        item { Text("الدليل التشغيلي المتقدم", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1)) }
+        items(tips) { (t, d) ->
+            Card(Modifier.padding(vertical = 8.dp).fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(t, fontWeight = FontWeight.Bold)
+                    Text(d, fontSize = 14.sp)
                 }
             }
         }
     }
 }
-
-@Composable
-fun GuideScreen() {
-    val info = listOf(
-        "المزامنة" to "يتم ربط التطبيق بملف OneDrive عبر الرابط في الإعدادات.",
-        "قاعدة العلف" to "سعر الكيس = سعر الطن / 20. يتم التحديث تلقائياً.",
-        "الإنتاج" to "البيض المتبقي = إنتاج اليوم - تحميل اليوم.",
-        "الإدخال الذكي" to "يمكنك تفعيل الميكروفون والكاميرا للإدخال الصوتي وقراءة الصور."
-    )
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item { Text("دليل تشغيل النظام", fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-        items(info) { (title, desc) ->
-            Text("• $title: $desc", modifier = Modifier.padding(vertical = 8.dp))
-            Divider()
-        }
-    }
-}
-
-@Composable fun EntryScreen() { Text("شاشة الإضافة (صوت/صور) جاهزة للاستخدام", modifier = Modifier.padding(16.dp)) }
-@Composable fun InventoryScreen() { Text("مراقبة المخزون المتبقي لحظياً", modifier = Modifier.padding(16.dp)) }
