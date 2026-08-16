@@ -42,6 +42,7 @@ dependencies {
     implementation 'androidx.compose.material3:material3'
     implementation "androidx.compose.material:material-icons-extended"
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
+    implementation "com.squareup.okhttp3:okhttp:4.11.0"
 
     // --- الإضافة الجديدة: محرك حفظ البيانات (Room) لضمان عدم ضياع المدخلات ---
     implementation "androidx.room:room-runtime:2.5.2"
