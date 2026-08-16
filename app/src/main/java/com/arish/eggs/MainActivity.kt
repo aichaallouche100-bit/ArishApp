@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape // الإصلاح هنا
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -26,7 +27,7 @@ import androidx.compose.ui.unit.*
 import androidx.room.*
 import java.util.*
 
-// --- 1. قاعدة البيانات (دعم التحديث التلقائي) ---
+// --- 1. قاعدة البيانات (Room Database) ---
 
 @Entity(tableName = "transactions")
 data class Transaction(
@@ -57,7 +58,7 @@ abstract class ArishDatabase : RoomDatabase() {
     abstract fun dao(): TransactionDao
 }
 
-// --- 2. المحرك المحاسبي الذكي (حفظ لحظي) ---
+// --- 2. المحرك المحاسبي الذكي ---
 
 class ArishLogic(context: Context) {
     private val db = Room.databaseBuilder(context, ArishDatabase::class.java, "arish_db")
@@ -70,19 +71,21 @@ class ArishLogic(context: Context) {
         transactions.addAll(db.dao().getAll())
     }
 
-    // إضافة سطر جديد فارغ (مثل إكسل)
     fun addNewBlankRow() {
         val newTr = Transaction(farm = farms[0], category = "علف", qty = 0.0, price = 19.375)
         val id = db.dao().insert(newTr)
         transactions.add(0, newTr.copy(id = id.toInt()))
     }
 
-    // تحديث خلية معينة فوراً
     fun updateCell(tr: Transaction) {
         db.dao().update(tr)
-        // إعادة حساب الأرقام في الواجهة
         val index = transactions.indexOfFirst { it.id == tr.id }
-        if (index != -1) transactions[index] = tr 
+        if (index != -1) transactions[index] = tr.copy() // تفعيل التحديث اللحظي
+    }
+
+    fun deleteRow(tr: Transaction) {
+        db.dao().delete(tr)
+        transactions.remove(tr)
     }
 
     fun calculateProfit(farmName: String): Double {
@@ -91,12 +94,12 @@ class ArishLogic(context: Context) {
     }
 
     fun getSuperStock(): Double {
-        val used = transactions.filter { it.category == "علف" }.sumOf { it.qty }
-        return 151.55 - (used / 20.0)
+        val consumed = transactions.filter { it.category == "علف" }.sumOf { it.qty }
+        return 151.55 - (consumed / 20.0)
     }
 }
 
-// --- 3. واجهة المستخدم (Excel Spreadsheet Style) ---
+// --- 3. واجهة المستخدم ---
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -142,26 +145,23 @@ fun LiveExcelGrid(logic: ArishLogic) {
     Column(Modifier.padding(4.dp)) {
         Button(
             onClick = { logic.addNewBlankRow() },
-            modifier = Modifier.fillMaxWidth().height(40.dp),
+            modifier = Modifier.fillMaxWidth().height(45.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-            shape = RoundedCornerShape(4.dp)
+            shape = RoundedCornerShape(8.dp)
         ) {
             Icon(Icons.Default.Add, null)
-            Text("إضافة سطر جديد (إكسل)")
+            Text("إضافة سطر جديد للجدول")
         }
 
         Spacer(Modifier.height(4.dp))
 
-        // رأس الجدول
-        Row(Modifier.background(Color(0xFF455A64)).padding(4.dp).fillMaxWidth()) {
+        Row(Modifier.background(Color(0xFF455A64)).padding(6.dp).fillMaxWidth()) {
             HeaderCell("المزرعة", 1.2f)
             HeaderCell("الصنف", 1f)
             HeaderCell("الكمية", 0.6f)
-            HeaderCell("السعر", 0.6f)
             HeaderCell("القيمة", 0.8f)
         }
 
-        // الأسطر الحية (تعديل مباشر)
         LazyColumn(Modifier.fillMaxSize()) {
             items(logic.transactions, key = { it.id }) { tr ->
                 EditableRow(tr, logic)
@@ -174,7 +174,7 @@ fun LiveExcelGrid(logic: ArishLogic) {
 @Composable
 fun EditableRow(tr: Transaction, logic: ArishLogic) {
     Row(Modifier.background(Color.White).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        // خلية المزرعة (قائمة منسدلة)
+        // المزرعة
         var expF by remember { mutableStateOf(false) }
         Box(Modifier.weight(1.2f).border(0.5.dp, Color.LightGray).clickable { expF = true }.padding(8.dp)) {
             Text(tr.farm, fontSize = 10.sp)
@@ -189,7 +189,7 @@ fun EditableRow(tr: Transaction, logic: ArishLogic) {
             }
         }
 
-        // خلية الصنف
+        // الصنف
         var expC by remember { mutableStateOf(false) }
         val cats = listOf("علف", "بيض انتاج", "بيض تحميل", "وفيات", "مدخول", "دواء")
         Box(Modifier.weight(1f).border(0.5.dp, Color.LightGray).clickable { expC = true }.padding(8.dp)) {
@@ -205,37 +205,36 @@ fun EditableRow(tr: Transaction, logic: ArishLogic) {
             }
         }
 
-        // خلية الكمية (إدخال مباشر)
+        // الكمية
         EditableCell(tr.qty.toString(), Modifier.weight(0.6f)) {
             tr.qty = it.toDoubleOrNull() ?: 0.0
             logic.updateCell(tr)
         }
 
-        // خلية السعر (إدخال مباشر)
-        EditableCell(tr.price.toString(), Modifier.weight(0.6f)) {
-            tr.price = it.toDoubleOrNull() ?: 0.0
-            logic.updateCell(tr)
-        }
-
-        // خلية القيمة (محسوبة تلقائياً)
+        // القيمة النهائية
         val total = tr.qty * tr.price
         Text(
-            text = String.format("%.2f", total),
+            text = String.format("%.1f", total),
             modifier = Modifier.weight(0.8f).padding(8.dp),
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = if (tr.incomeValue > 0) Color(0xFF2E7D32) else Color.Red
         )
+        
+        // زر الحذف
+        IconButton(onClick = { logic.deleteRow(tr) }, Modifier.size(24.dp)) {
+            Icon(Icons.Default.Delete, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+        }
     }
 }
 
 @Composable
 fun EditableCell(value: String, modifier: Modifier, onValueChange: (String) -> Unit) {
-    var text by remember { mutableStateOf(value) }
+    var textState by remember { mutableStateOf(value) }
     BasicTextField(
-        value = text,
+        value = textState,
         onValueChange = { 
-            text = it
+            textState = it
             onValueChange(it) 
         },
         modifier = modifier.border(0.5.dp, Color.LightGray).padding(8.dp),
@@ -249,12 +248,13 @@ fun RowScope.HeaderCell(text: String, weight: Float) {
     Text(text, Modifier.weight(weight).padding(4.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 }
 
-@Composable fun SummaryScreen(logic: ArishLogic) {
+@Composable
+fun SummaryScreen(logic: ArishLogic) {
     LazyColumn(Modifier.padding(16.dp)) {
-        item { Text("أرباح المزارع الحالية", style = MaterialTheme.typography.headlineSmall) }
+        item { Text("أرباح المزارع التراكمية", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1)) }
         items(logic.farms) { farm ->
-            Row(Modifier.fillMaxWidth().padding(8.dp), Arrangement.SpaceBetween) {
-                Text(farm)
+            Row(Modifier.fillMaxWidth().padding(12.dp), Arrangement.SpaceBetween) {
+                Text(farm, fontWeight = FontWeight.Medium)
                 Text("${String.format("%.2f", logic.calculateProfit(farm))} $", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
             }
             Divider()
@@ -262,14 +262,15 @@ fun RowScope.HeaderCell(text: String, weight: Float) {
     }
 }
 
-@Composable fun InventoryScreen(logic: ArishLogic) {
-    Column(Modifier.padding(20.dp)) {
-        Text("رصيد المستودع", style = MaterialTheme.typography.headlineSmall)
+@Composable
+fun InventoryScreen(logic: ArishLogic) {
+    Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("رصيد المستودع (السحابي)", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(20.dp))
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFE65100)), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(24.dp)) {
-                Text("مخزون Super المتبقي", color = Color.White)
-                Text("${String.format("%.2f", logic.getSuperStock())} كيس", fontSize = 35.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("رصيد Super المتبقي", color = Color.White)
+                Text("${String.format("%.2f", logic.getSuperStock())} كيس", fontSize = 40.sp, color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     }
