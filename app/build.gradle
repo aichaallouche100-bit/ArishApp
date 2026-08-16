@@ -2,38 +2,26 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
 }
-
 android {
     namespace 'com.arish.eggs'
     compileSdk 33
-
     defaultConfig {
         applicationId "com.arish.eggs"
         minSdk 24
         targetSdk 33
-        versionCode 3
-        versionName "2.1"
+        // الحل الجذري لاستقبال رقم الإصدار تلقائياً
+        versionCode project.hasProperty('autoVersionCode') ? project.property('autoVersionCode').toInteger() : 1
+        versionName project.hasProperty('autoVersionName') ? project.property('autoVersionName').toString() : "1.0"
+        resValue "string", "app_name", "Arish Eggs"
     }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = '17'
-    }
-
-    buildFeatures {
-        compose true
-    }
-
-    composeOptions {
-        // متوافق مع Kotlin 1.8.10 التي ضبطناها في الملف الرئيسي
-        kotlinCompilerExtensionVersion '1.4.3'
-    }
+    kotlinOptions { jvmTarget = '17' }
+    buildFeatures { compose true }
+    composeOptions { kotlinCompilerExtensionVersion '1.4.3' }
 }
-
 dependencies {
     implementation 'androidx.core:core-ktx:1.10.0'
     implementation 'androidx.activity:activity-compose:1.7.2'
@@ -42,9 +30,7 @@ dependencies {
     implementation 'androidx.compose.material3:material3'
     implementation "androidx.compose.material:material-icons-extended"
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
-    implementation "com.squareup.okhttp3:okhttp:4.11.0"
-
-    // --- الإضافة الجديدة: محرك حفظ البيانات (Room) لضمان عدم ضياع المدخلات ---
+    // مكتبة الحفظ الدائم
     implementation "androidx.room:room-runtime:2.5.2"
     implementation "androidx.room:room-ktx:2.5.2"
     annotationProcessor "androidx.room:room-compiler:2.5.2"
