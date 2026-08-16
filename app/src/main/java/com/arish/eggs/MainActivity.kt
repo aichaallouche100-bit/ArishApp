@@ -14,266 +14,255 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import java.util.*
 
-// --- 1. هيكل البيانات والمعادلات (حسب طلبك: المدخول والمصروف) ---
+// --- 1. النماذج الديناميكية (Dynamic Models) ---
 
 data class Transaction(
-    val farmName: String,
-    val type: String,
-    val quantity: Double,
-    val unitPrice: Double,
-    val date: String = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-) {
-    // معادلة المدخول المحدثة: بيض تحميل أو مدخول
-    val incomeValue: Double 
-        get() = if (type == "بيض تحميل" || type == "مدخول") quantity * unitPrice else 0.0
-
-    // معادلة المصروف المحدثة: يستثني أي صنف فيه "بيض" أو "مدخول"
-    val expenseValue: Double 
-        get() = if (type.contains("بيض") || type == "مدخول") 0.0 else quantity * unitPrice
-}
-
-data class FarmData(
-    val name: String,
-    val initialBirds: Int,
-    var deaths: Int = 0,
-    var eggStock: Double = 0.0,
-    var totalNetProfit: Double = 0.0,
-    var totalExpenses: Double = 0.0,
-    var totalIncome: Double = 0.0
+    val id: String = UUID.randomUUID().toString(),
+    val farm: String,
+    val category: String,
+    val qty: Double,
+    val price: Double,
+    val date: String
 )
 
-// --- 2. المحرك المحاسبي الذكي ---
+data class FarmSettings(
+    val name: String,
+    val initialBirds: Int
+)
 
-class ArishLogic {
-    val feedTonPrice = 387.5
-    val tonToBagRatio = 20.0
-    val initialSuperStock = 151.55
+// --- 2. محرك القواعد الديناميكي (Logic Engine) ---
 
+class ArishSystem {
+    // ثوابت قابلة للتعديل من داخل التطبيق
+    var feedTonPrice by mutableStateOf(387.5)
+    var tonToBagRatio by mutableStateOf(20.0)
+    var eggDefaultPrice by mutableStateOf(2.25)
+    var initialSuperStock by mutableStateOf(151.55)
+
+    // قائمة المزارع
     val farms = mutableStateListOf(
-        FarmData("فايز الطويلة", 7500),
-        FarmData("فايز البرشا", 2800),
-        FarmData("فايز الألفين", 2000),
-        FarmData("ابو حمدو العقيد", 2000),
-        FarmData("ابو حمدو جديدة", 3300),
-        FarmData("ابو حمدو الاخرس", 3800),
-        FarmData("ام نضال ١", 10900),
-        FarmData("ام نضال ٢", 0)
+        FarmSettings("فايز الطويلة", 7500), FarmSettings("فايز البرشا", 2800),
+        FarmSettings("فايز الألفين", 2000), FarmSettings("ابو حمدو العقيد", 2000),
+        FarmSettings("ابو حمدو جديدة", 3300), FarmSettings("ابو حمدو الاخرس", 3800),
+        FarmSettings("ام نضال ١", 10900), FarmSettings("ام نضال ٢", 0)
     )
 
+    // سجل البيانات
     val transactions = mutableStateListOf<Transaction>()
 
-    fun addMovement(farm: String, type: String, qty: Double, price: Double) {
-        transactions.add(Transaction(farm, type, qty, price))
-        updateCalculations()
+    // محرك المعادلات (Logic Formulas)
+    fun isIncome(category: String): Boolean = category == "بيض تحميل" || category == "مدخول"
+    
+    fun isExpense(category: String): Boolean {
+        return !(category.contains("بيض") || category == "مدخول")
     }
 
-    private fun updateCalculations() {
-        farms.forEach { farm ->
-            val farmMoves = transactions.filter { it.farmName == farm.name }
-            farm.deaths = farmMoves.filter { it.type == "وفيات" }.sumOf { it.quantity }.toInt()
-            val prod = farmMoves.filter { it.type == "بيض انتاج" }.sumOf { it.quantity }
-            val load = farmMoves.filter { it.type == "بيض تحميل" }.sumOf { it.quantity }
-            farm.eggStock = prod - load
-            farm.totalIncome = farmMoves.sumOf { it.incomeValue }
-            farm.totalExpenses = farmMoves.sumOf { it.expenseValue }
-            farm.totalNetProfit = farm.totalIncome - farm.totalExpenses
-        }
+    fun calculateProfit(farmName: String): Double {
+        val moves = transactions.filter { it.farm == farmName }
+        val income = moves.filter { isIncome(it.category) }.sumOf { it.qty * it.price }
+        val expense = moves.filter { isExpense(it.category) }.sumOf { it.qty * it.price }
+        return income - expense
     }
 
-    fun getSuperRemaining(): Double {
-        val consumedFeed = transactions.filter { it.type == "علف" }.sumOf { it.quantity }
+    fun getSuperStock(): Double {
+        val consumedFeed = transactions.filter { it.category == "علف" }.sumOf { it.qty }
         return initialSuperStock - (consumedFeed / tonToBagRatio)
     }
 }
 
-// --- 3. واجهة المستخدم ---
+// --- 3. واجهة المستخدم (التصميم الجدولي والديناميكي) ---
 
 class MainActivity : ComponentActivity() {
-    private val logic = ArishLogic()
+    private val system = ArishSystem()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                MainAppFrame(logic)
-            }
+            MaterialTheme { MainContainer(system) }
         }
     }
 }
 
 @Composable
-fun MainAppFrame(logic: ArishLogic) {
+fun MainContainer(system: ArishSystem) {
     var tab by remember { mutableStateOf(0) }
     val navy = Color(0xFF0D47A1)
 
     Scaffold(
         bottomBar = {
             NavigationBar(containerColor = navy) {
-                val menu = listOf("الرئيسية", "الحركة", "المخزون", "دليل")
-                val icons = listOf(Icons.Default.Dashboard, Icons.Default.ReceiptLong, Icons.Default.Inventory, Icons.Default.MenuBook)
-                menu.forEachIndexed { index, label ->
+                val menu = listOf("الملخص", "الجدول", "المخزون", "قواعد الحساب")
+                val icons = listOf(Icons.Default.Dashboard, Icons.Default.GridOn, Icons.Default.Inventory, Icons.Default.Settings)
+                menu.forEachIndexed { i, label ->
                     NavigationBarItem(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        icon = { Icon(icons[index], null, tint = if(tab == index) Color.Yellow else Color.White) },
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        icon = { Icon(icons[i], null, tint = Color.White) },
                         label = { Text(label, color = Color.White, fontSize = 10.sp) }
                     )
                 }
             }
         }
-    ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize().background(Color(0xFFF0F4F8))) {
+    ) { p ->
+        Box(Modifier.padding(p).fillMaxSize().background(Color(0xFFF1F3F4))) {
             when (tab) {
-                0 -> DashboardScreen(logic)
-                1 -> MovementLedger(logic)
-                2 -> InventoryStats(logic)
-                3 -> HelpGuide()
+                0 -> SummaryView(system)
+                1 -> ExcelGridView(system)
+                2 -> InventoryView(system)
+                3 -> RulesEditorView(system) // شاشة تعديل القواعد والكودات
             }
         }
     }
 }
 
 @Composable
-fun DashboardScreen(logic: ArishLogic) {
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item {
-            Text("نظام نهر اسطوان المحاسبي", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
-            Spacer(Modifier.height(16.dp))
-        }
-        items(logic.farms) { farm ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                elevation = CardDefaults.cardElevation(4.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                        Text(farm.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text("${String.format("%.2f", farm.totalNetProfit)} $", 
-                            color = if(farm.totalNetProfit >= 0) Color(0xFF2E7D32) else Color.Red, 
-                            fontWeight = FontWeight.ExtraBold)
-                    }
-                    DividerLine()
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-                        StatItem("طيور", "${farm.initialBirds - farm.deaths}", Icons.Default.Pets, Color.DarkGray)
-                        StatItem("بيض", "${farm.eggStock}", Icons.Default.Egg, Color(0xFFE65100))
-                        StatItem("مصروف", "${farm.totalExpenses}", Icons.Default.TrendingDown, Color.Red)
-                    }
-                }
-            }
-        }
-    }
-}
+fun ExcelGridView(system: ArishSystem) {
+    var qty by remember { mutableStateOf("") }
+    var selectedFarm by remember { mutableStateOf(system.farms[0].name) }
+    var selectedCat by remember { mutableStateOf("علف") }
+    var showFarmMenu by remember { mutableStateOf(false) }
 
-@Composable
-fun MovementLedger(logic: ArishLogic) {
-    var qtyText by remember { mutableStateOf("") }
-    var selectedFarm by remember { mutableStateOf(logic.farms[0].name) }
-    var selectedType by remember { mutableStateOf("علف") }
-    var expF by remember { mutableStateOf(false) }
-    var expT by remember { mutableStateOf(false) }
-
-    val categories = listOf("علف", "بيض انتاج", "بيض تحميل", "وفيات", "مدخول", "دواء", "نثريات")
-
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("تسجيل حركة يومية", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Card(modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Box {
-                    OutlinedButton(onClick = { expF = true }, Modifier.fillMaxWidth()) { Text("المزرعة: $selectedFarm") }
-                    DropdownMenu(expanded = expF, onDismissRequest = { expF = false }) {
-                        logic.farms.forEach { f -> DropdownMenuItem(text = { Text(f.name) }, onClick = { selectedFarm = f.name; expF = false }) }
-                    }
-                }
-                Row(Modifier.padding(vertical = 8.dp)) {
-                    Box(Modifier.weight(1.2f)) {
-                        OutlinedButton(onClick = { expT = true }, Modifier.fillMaxWidth()) { Text(selectedType) }
-                        DropdownMenu(expanded = expT, onDismissRequest = { expT = false }) {
-                            categories.forEach { c -> DropdownMenuItem(text = { Text(c) }, onClick = { selectedType = c; expT = false }) }
+    Column(Modifier.padding(8.dp)) {
+        // --- منطقة الإدخال الذكي ---
+        Card(elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // اختيار المزرعة
+                    Box(Modifier.weight(1.5f)) {
+                        Button(onClick = { showFarmMenu = true }) { Text(selectedFarm, fontSize = 11.sp) }
+                        DropdownMenu(expanded = showFarmMenu, onDismissRequest = { showFarmMenu = false }) {
+                            system.farms.forEach { f ->
+                                DropdownMenuItem(text = { Text(f.name) }, onClick = { selectedFarm = f.name; showFarmMenu = false })
+                            }
                         }
                     }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedTextField(value = qtyText, onValueChange = { qtyText = it }, label = { Text("الكمية") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = qty,
+                        onValueChange = { qty = it },
+                        placeholder = { Text("الكمية") },
+                        modifier = Modifier.weight(1f).height(55.dp)
+                    )
+                    IconButton(onClick = {
+                        val q = qty.toDoubleOrNull() ?: 0.0
+                        val p = if(selectedCat == "علف") (system.feedTonPrice/system.tonToBagRatio) else system.eggDefaultPrice
+                        system.transactions.add(Transaction(farm = selectedFarm, category = selectedCat, qty = q, price = p, date = "اليوم"))
+                        qty = ""
+                    }) { Icon(Icons.Default.AddCircle, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(40.dp)) }
                 }
-                Button(
-                    onClick = {
-                        val q = qtyText.toDoubleOrNull() ?: 0.0
-                        val p = if(selectedType == "علف") (logic.feedTonPrice/20.0) else if(selectedType == "بيض تحميل" || selectedType == "مدخول") 2.25 else 0.0
-                        logic.addMovement(selectedFarm, selectedType, q, p)
-                        qtyText = ""
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D47A1))
-                ) { Text("تأكيد وحفظ") }
+
+                // اختيار الصنف
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp)) {
+                    val cats = listOf("علف", "بيض انتاج", "بيض تحميل", "وفيات", "مدخول", "دواء")
+                    cats.forEach { cat ->
+                        FilterChip(
+                            selected = selectedCat == cat,
+                            onClick = { selectedCat = cat },
+                            label = { Text(cat, fontSize = 10.sp) },
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        )
+                    }
+                }
             }
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+
+        Spacer(Modifier.height(8.dp))
+
+        // --- جدول إكسل (Excel Grid) ---
+        LazyColumn(Modifier.fillMaxSize().border(1.dp, Color.LightGray)) {
             item {
-                Row(Modifier.background(Color(0xFF0D47A1)).padding(8.dp).fillMaxWidth()) {
-                    Text("المزرعة", Modifier.weight(1f), color = Color.White, fontSize = 12.sp)
-                    Text("الصنف", Modifier.weight(1f), color = Color.White, fontSize = 12.sp)
-                    Text("القيمة", Modifier.weight(0.7f), color = Color.White, fontSize = 12.sp)
+                Row(Modifier.background(Color(0xFF455A64)).padding(8.dp)) {
+                    Cell("المزرعة", 1.5f, true)
+                    Cell("الصنف", 1f, true)
+                    Cell("الكمية", 0.7f, true)
+                    Cell("القيمة", 1f, true)
                 }
             }
-            items(logic.transactions.reversed()) { tr ->
-                Row(Modifier.padding(8.dp).fillMaxWidth()) {
-                    Text(tr.farmName, Modifier.weight(1f), fontSize = 13.sp)
-                    Text(tr.type, Modifier.weight(1f), fontSize = 13.sp)
-                    val disp = if(tr.incomeValue > 0) tr.incomeValue else tr.expenseValue
-                    Text("${String.format("%.2f", disp)}$", Modifier.weight(0.7f), color = if(tr.incomeValue > 0) Color(0xFF2E7D32) else Color.Red, fontWeight = FontWeight.Bold)
+            items(system.transactions.reversed()) { tr ->
+                Row(Modifier.background(Color.White).border(0.2.dp, Color(0xFFEEEEEE))) {
+                    Cell(tr.farm, 1.5f)
+                    Cell(tr.category, 1f)
+                    Cell(tr.qty.toString(), 0.7f)
+                    val dispVal = tr.qty * tr.price
+                    Cell("${String.format("%.2f", dispVal)}$", 1f, if(system.isIncome(tr.category)) Color(0xFF2E7D32) else Color.Red)
                 }
-                DividerLine()
             }
         }
     }
 }
 
 @Composable
-fun InventoryStats(logic: ArishLogic) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("المخازن", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+fun RowScope.Cell(text: String, weight: Float, isHeader: Boolean = false, color: Color = if(isHeader) Color.White else Color.Black) {
+    Text(
+        text = text,
+        modifier = Modifier.weight(weight).border(0.5.dp, Color.LightGray).padding(8.dp),
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = if(isHeader) FontWeight.Bold else FontWeight.Normal
+    )
+}
+
+@Composable
+fun RulesEditorView(system: ArishSystem) {
+    var newPrice by remember { mutableStateOf(system.feedTonPrice.toString()) }
+    var newRatio by remember { mutableStateOf(system.tonToBagRatio.toString()) }
+
+    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("إعدادات القواعد والحسابات", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1))
         Spacer(Modifier.height(20.dp))
-        BigStat("رصيد Super (كيس)", String.format("%.2f", logic.getSuperRemaining()), Color(0xFFE65100))
-        BigStat("إجمالي البيض (كرتونة)", logic.farms.sumOf { it.eggStock }.toString(), Color(0xFF004D40))
-    }
-}
+        
+        Text("تعديل الثوابت المالية:", fontWeight = FontWeight.Bold)
+        OutlinedTextField(value = newPrice, onValueChange = {newPrice = it}, label = { Text("سعر طن العلف") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = newRatio, onValueChange = {newRatio = it}, label = { Text("معامل التحويل (طن/كيس)") }, modifier = Modifier.fillMaxWidth())
+        
+        Button(
+            onClick = {
+                system.feedTonPrice = newPrice.toDoubleOrNull() ?: 387.5
+                system.tonToBagRatio = newRatio.toDoubleOrNull() ?: 20.0
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+        ) { Text("تحديث قواعد الحساب فوراً") }
 
-@Composable
-fun StatItem(label: String, value: String, icon: ImageVector, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, modifier = Modifier.size(16.dp), tint = color)
-        Text(value, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = color)
-        Text(label, fontSize = 9.sp, color = Color.Gray)
-    }
-}
-
-@Composable
-fun BigStat(t: String, v: String, c: Color) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = c)) {
-        // تم تصحيح الخطأ هنا (إضافة horizontalAlignment = ...)
-        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(t, color = Color.White, fontSize = 15.sp)
-            Text(v, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(30.dp))
+        Text("دليل الأكواد:", fontWeight = FontWeight.Bold)
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("• بيض تحميل / مدخول = مدخلات موجبة.")
+                Text("• علف / دواء / نثريات = مصاريف سالبة.")
+                Text("• يتم تطبيق المعادلات لحظياً على كافة السجلات.")
+            }
         }
     }
 }
 
 @Composable
-fun HelpGuide() {
-    val helpItems = listOf("المدخول" to "يشمل بيض التحميل وكلمة 'مدخول'.", "المصروف" to "كل شيء عدا البيض والمدخول.")
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item { Text("دليل المحاسبة", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        items(helpItems) { i ->
-            Spacer(Modifier.height(16.dp))
-            Text(i.first, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
-            Text(i.second, fontSize = 14.sp)
-            DividerLine()
+fun SummaryView(system: ArishSystem) {
+    LazyColumn(Modifier.padding(16.dp)) {
+        item { Text("خلاصة المزارع", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+        items(system.farms) { farm ->
+            Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) {
+                    Text(farm.name, fontWeight = FontWeight.Bold)
+                    Text("${String.format("%.2f", system.calculateProfit(farm.name))} $", color = Color(0xFF2E7D32))
+                }
+            }
         }
     }
 }
 
-@Composable fun DividerLine() { Box(Modifier.fillMaxWidth().height(1.dp).background(Color.LightGray)) }
+@Composable
+fun InventoryView(system: ArishSystem) {
+    Column(Modifier.padding(20.dp)) {
+        Text("المخازن", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Spacer(Modifier.height(20.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFE65100)), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("رصيد Super المتبقي", color = Color.White)
+                Text("${String.format("%.2f", system.getSuperStock())} كيس", fontSize = 35.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
