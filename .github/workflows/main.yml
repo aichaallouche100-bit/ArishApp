@@ -5,21 +5,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4 # تم التحديث للنسخة 4 لدعم Node 24
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.5 # حددنا النسخة 8.5 وهي الأكثر استقراراً الآن
-
-      - name: Build APK
-        run: gradle assembleDebug
-
+          gradle-version: 8.5
+      - name: Build APK with Auto-Version
+        # الحل الجذري: سطر بناء يرسل رقم المحاولة كإصدار للتطبيق
+        run: gradle assembleDebug -PautoVersionCode=${{ github.run_number }} -PautoVersionName="5.2.${{ github.run_number }}"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
