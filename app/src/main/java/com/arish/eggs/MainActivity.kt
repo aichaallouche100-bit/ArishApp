@@ -29,9 +29,9 @@ import androidx.room.*
 import kotlinx.coroutines.*
 import java.util.*
 
-// --- 1. قاعدة البيانات (تم تثبيت الجداول والأسماء) ---
+// --- 1. قاعدة البيانات (تم تغيير الهيكل ليكون أكثر استقراراً) ---
 
-@Entity(tableName = "arish_master_v8")
+@Entity(tableName = "arish_records_v9")
 data class Transaction(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     var farm: String,
@@ -39,33 +39,27 @@ data class Transaction(
     var qty: Double,
     var price: Double
 ) {
-    // معادلة المدخول: =IF(OR(C3="بيض تحميل"; C3="مدخول"); D3*E3; 0)
     val incomeVal: Double get() = if (category == "بيض تحميل" || category == "مدخول") qty * price else 0.0
-
-    // معادلة المصروف: =IF(OR(ISNUMBER(SEARCH("بيض"; C3)); ISNUMBER(SEARCH("مدخول"; C3))); 0; D3*E3)
     val expenseVal: Double get() = if (category.contains("بيض") || category == "مدخول") 0.0 else qty * price
 }
 
 @Dao interface TransactionDao {
-    @Query("SELECT * FROM arish_master_v8 ORDER BY id DESC")
+    @Query("SELECT * FROM arish_records_v9 ORDER BY id DESC")
     suspend fun getAll(): List<Transaction>
     @Insert suspend fun insert(tr: Transaction): Long
     @Update suspend fun update(tr: Transaction)
     @Delete suspend fun delete(tr: Transaction)
 }
 
-@Database(entities = [Transaction::class], version = 8, exportSchema = false)
+@Database(entities = [Transaction::class], version = 9, exportSchema = false)
 abstract class ArishDatabase : RoomDatabase() { abstract fun dao(): TransactionDao }
 
-// --- 2. المحرك المحاسبي الذكي (Logic) ---
+// --- 2. المحرك المحاسبي الذكي (Async Logic) ---
 
 class ArishLogic(val context: Context) {
-    private val db = Room.databaseBuilder(context, ArishDatabase::class.java, "arish_final_secure.db")
-        .fallbackToDestructiveMigration().build()
-    
+    private var db: ArishDatabase? = null
     val transactions = mutableStateListOf<Transaction>()
-    
-    // المزارع وأعداد الطيور كما في ملفاتك
+    val farms = listOf("فايز الطويلة", "فايز البرشا", "فايز الألفين", "ابو حمدو العقيد", "ابو حمدو جديدة", "ابو حمدو الاخرس", "ام نضال ١", "ام نضال ٢")
     val farmInitialData = mapOf(
         "فايز الطويلة" to 7500, "فايز البرشا" to 2800, "فايز الألفين" to 2000,
         "ابو حمدو العقيد" to 2000, "ابو حمدو جديدة" to 3300, "ابو حمدو الاخرس" to 3800,
@@ -74,38 +68,55 @@ class ArishLogic(val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
-    fun loadData() {
+    // تهيئة قاعدة البيانات بشكل آمن في الخلفية
+    fun initDatabase() {
         scope.launch {
-            val list = withContext(Dispatchers.IO) { try { db.dao().getAll() } catch(e:Exception) { emptyList() } }
-            transactions.clear()
-            transactions.addAll(list)
+            withContext(Dispatchers.IO) {
+                try {
+                    db = Room.databaseBuilder(context, ArishDatabase::class.java, "arish_v9_ultimate.db")
+                        .fallbackToDestructiveMigration()
+                        .build()
+                    val list = db?.dao()?.getAll() ?: emptyList()
+                    withContext(Dispatchers.Main) {
+                        transactions.clear()
+                        transactions.addAll(list)
+                    }
+                } catch (e: Exception) {
+                    // فشل التحميل لن يغلق التطبيق
+                }
+            }
         }
     }
 
     fun addRow() {
         scope.launch {
             val newTr = Transaction(farm = "فايز الطويلة", category = "علف", qty = 0.0, price = 19.375)
-            val id = withContext(Dispatchers.IO) { db.dao().insert(newTr) }
-            transactions.add(0, newTr.copy(id = id.toInt()))
+            withContext(Dispatchers.IO) {
+                val id = db?.dao()?.insert(newTr) ?: 0L
+                withContext(Dispatchers.Main) {
+                    transactions.add(0, newTr.copy(id = id.toInt()))
+                }
+            }
         }
     }
 
     fun updateCell(tr: Transaction) {
-        scope.launch(Dispatchers.IO) { db.dao().update(tr) }
+        scope.launch(Dispatchers.IO) {
+            try { db?.dao()?.update(tr) } catch (e: Exception) {}
+        }
     }
 
     fun deleteRow(tr: Transaction) {
         scope.launch {
-            withContext(Dispatchers.IO) { db.dao().delete(tr) }
+            withContext(Dispatchers.IO) { try { db?.dao()?.delete(tr) } catch (e: Exception) {} }
             transactions.remove(tr)
         }
     }
 
-    // الحسابات التراكمية لكل مزرعة
     fun getFarmStats(name: String): Triple<Double, Int, Double> {
         val moves = transactions.filter { it.farm == name }
         val profit = moves.sumOf { it.incomeVal - it.expenseVal }
-        val deaths = moves.filter { it.category == "وفيات" }.sumOf { it.qty }.toInt()
+        val deaths = moves.filter { it.category == "وفيات" }.sumOf { it.quantity }.toInt()
         val eggStock = moves.filter { it.category == "بيض انتاج" }.sumOf { it.qty } - 
                        moves.filter { it.category == "بيض تحميل" }.sumOf { it.qty }
         return Triple(profit, (farmInitialData[name] ?: 0) - deaths, eggStock)
@@ -114,15 +125,17 @@ class ArishLogic(val context: Context) {
     fun getSuperStock(): Double = 151.55 - (transactions.filter { it.category == "علف" }.sumOf { it.qty } / 20.0)
 }
 
-// --- 3. تصميم واجهة المستخدم (Excel Experience) ---
+// --- 3. الواجهة والتشغيل ---
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val logic = ArishLogic(applicationContext)
+        // بدأ تحميل البيانات فوراً ولكن في الخلفية
+        logic.initDatabase()
+
         setContent {
             MaterialTheme {
-                LaunchedEffect(Unit) { logic.loadData() }
                 MainApp(logic)
             }
         }
@@ -144,13 +157,13 @@ fun MainApp(logic: ArishLogic) {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/aichaallouche100-bit/ArishApp/actions"))
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         logic.context.startActivity(intent)
-                    }) { Icon(Icons.Default.CloudDownload, "Update", tint = Color.Yellow) }
+                    }) { Icon(Icons.Default.CloudDownload, null, tint = Color.Yellow) }
                 }
             )
         },
         bottomBar = {
             NavigationBar(containerColor = navy) {
-                val menu = listOf("الملخص", "الجدول الحي", "المخازن")
+                val menu = listOf("الملخص", "الجدول", "المخازن")
                 val icons = listOf(Icons.Default.Analytics, Icons.Default.GridOn, Icons.Default.Warehouse)
                 menu.forEachIndexed { i, label ->
                     NavigationBarItem(
@@ -183,31 +196,26 @@ fun LiveGridView(logic: ArishLogic) {
             shape = RoundedCornerShape(8.dp)
         ) {
             Icon(Icons.Default.Add, null)
-            Text(" إضافة سطر إكسل جديد", fontWeight = FontWeight.Bold)
+            Text(" إضافة سطر جديد", fontWeight = FontWeight.Bold)
         }
         
         Spacer(Modifier.height(4.dp))
 
-        // رأس الجدول (Excel Header)
         Row(Modifier.background(Color(0xFF455A64)).padding(8.dp).fillMaxWidth()) {
-            TableCell("المزرعة", 1.2f, true); TableCell("الصنف", 1f, true)
-            TableCell("الكمية", 0.6f, true); TableCell("القيمة", 0.8f, true)
+            HeaderCell("المزرعة", 1.2f); HeaderCell("الصنف", 1f)
+            HeaderCell("الكمية", 0.6f); HeaderCell("القيمة", 0.8f)
         }
 
         LazyColumn(Modifier.fillMaxSize()) {
             items(logic.transactions, key = { it.id }) { tr ->
                 Row(Modifier.background(Color.White).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    // المزرعة
                     var expF by remember { mutableStateOf(false) }
                     Box(Modifier.weight(1.2f).border(0.5.dp, Color(0xFFE0E0E0)).clickable { expF = true }.padding(10.dp)) {
                         Text(tr.farm, fontSize = 10.sp)
                         DropdownMenu(expanded = expF, onDismissRequest = { expF = false }) {
-                            logic.farmInitialData.keys.forEach { f ->
-                                DropdownMenuItem(text = { Text(f) }, onClick = { tr.farm = f; logic.updateCell(tr); expF = false })
-                            }
+                            logic.farms.forEach { f -> DropdownMenuItem(text = { Text(f) }, onClick = { tr.farm = f; logic.updateCell(tr); expF = false }) }
                         }
                     }
-                    // الصنف
                     var expC by remember { mutableStateOf(false) }
                     val cats = listOf("علف", "بيض انتاج", "بيض تحميل", "وفيات", "مدخول", "دواء")
                     Box(Modifier.weight(1f).border(0.5.dp, Color(0xFFE0E0E0)).clickable { expC = true }.padding(10.dp)) {
@@ -216,7 +224,6 @@ fun LiveGridView(logic: ArishLogic) {
                             cats.forEach { c -> DropdownMenuItem(text = { Text(c) }, onClick = { tr.category = c; logic.updateCell(tr); expC = false }) }
                         }
                     }
-                    // الكمية
                     var txt by remember { mutableStateOf(tr.qty.toString()) }
                     BasicTextField(
                         value = txt,
@@ -225,16 +232,8 @@ fun LiveGridView(logic: ArishLogic) {
                         textStyle = TextStyle(fontSize = 11.sp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
-                    // القيمة (محسوبة)
-                    Text(
-                        text = String.format("%.1f", tr.qty * tr.price),
-                        modifier = Modifier.weight(0.8f).padding(8.dp),
-                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        color = if (tr.incomeVal > 0) Color(0xFF2E7D32) else Color.Red
-                    )
-                    IconButton(onClick = { logic.deleteRow(tr) }, Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Delete, null, tint = Color.LightGray, modifier = Modifier.size(16.dp))
-                    }
+                    Text(text = String.format("%.1f", tr.qty * tr.price), modifier = Modifier.weight(0.8f).padding(8.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (tr.incomeVal > 0) Color(0xFF2E7D32) else Color.Red)
+                    IconButton(onClick = { logic.deleteRow(tr) }, Modifier.size(24.dp)) { Icon(Icons.Default.Delete, null, tint = Color.LightGray, modifier = Modifier.size(16.dp)) }
                 }
                 Divider(color = Color(0xFFEEEEEE), thickness = 0.5.dp)
             }
@@ -244,19 +243,16 @@ fun LiveGridView(logic: ArishLogic) {
 
 @Composable fun SummaryView(l: ArishLogic) {
     LazyColumn(Modifier.padding(16.dp)) {
-        item { Text("خلاصة المزارع والإنتاج", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1), fontWeight = FontWeight.Bold) }
-        items(l.farmInitialData.keys.toList()) { farm ->
+        item { Text("خلاصة المزارع", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1), fontWeight = FontWeight.Bold) }
+        items(l.farms) { farm ->
             val (profit, birds, eggs) = l.getFarmStats(farm)
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), elevation = CardDefaults.cardElevation(4.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                        Text(farm, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("${String.format("%.1f", profit)} $", color = if(profit >= 0) Color(0xFF2E7D32) else Color.Red, fontWeight = FontWeight.Bold)
+                        Text(farm, fontWeight = FontWeight.Bold); Text("${String.format("%.1f", profit)} $", color = if(profit >= 0) Color(0xFF2E7D32) else Color.Red)
                     }
-                    Divider(Modifier.padding(vertical = 8.dp))
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-                        SmallStat("طيور متبقية", birds.toString())
-                        SmallStat("رصيد البيض", eggs.toString())
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), Arrangement.SpaceEvenly) {
+                        Text("طيور: $birds", fontSize = 12.sp); Text("بيض: $eggs", fontSize = 12.sp)
                     }
                 }
             }
@@ -264,26 +260,16 @@ fun LiveGridView(logic: ArishLogic) {
     }
 }
 
-@Composable fun SmallStat(l: String, v: String) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(v, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-    Text(l, fontSize = 9.sp, color = Color.Gray)
-}
-
 @Composable fun InventoryView(l: ArishLogic) {
     Column(Modifier.padding(20.dp)) {
-        Text("تحليل المخازن", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(20.dp))
-        BigStatCard("رصيد Super المتبقي (كيس)", String.format("%.2f", l.getSuperStock()), Color(0xFFE65100))
-        BigStatCard("إجمالي كراتين البيض", l.transactions.filter { it.category == "بيض انتاج" }.sumOf { it.qty }.minus(l.transactions.filter { it.category == "بيض تحميل" }.sumOf { it.qty }).toString(), Color(0xFF004D40))
-        Spacer(Modifier.height(10.dp))
-        Text("• ملاحظة: يتم خصم 1 كيس سوبر مقابل كل 20 كيس علف مستهلك.", fontSize = 11.sp, color = Color.Gray)
+        Text("المخازن", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFE65100))) {
+            Column(Modifier.padding(24.dp), Alignment.CenterHorizontally) {
+                Text("رصيد Super المتبقي", color = Color.White)
+                Text("${String.format("%.2f", l.getSuperStock())} كيس", fontSize = 38.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
-@Composable fun BigStatCard(t: String, v: String, c: Color) = Card(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), colors = CardDefaults.cardColors(containerColor = c)) {
-    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(t, color = Color.White, fontSize = 14.sp); Text(v, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable fun RowScope.TableCell(t: String, w: Float, h: Boolean) = Text(t, Modifier.weight(w).padding(4.dp), color = if(h) Color.White else Color.Black, fontSize = 11.sp, fontWeight = if(h) FontWeight.Bold else FontWeight.Normal)
+@Composable fun HeaderCell(t: String, w: Float) = Text(t, Modifier.weight(w).padding(4.dp), Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
