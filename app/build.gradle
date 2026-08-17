@@ -1,4 +1,44 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.arish.eggs'
+    compileSdk 33
+
+    defaultConfig {
+        applicationId "com.arish.eggs.v14" // الهوية الجديدة لضمان عدم الانهيار
+        minSdk 24
+        targetSdk 33
+        
+        // محرك التحديث التلقائي الجذري
+        versionCode project.hasProperty('autoVersionCode') ? project.property('autoVersionCode').toInteger() : 1
+        versionName project.hasProperty('autoVersionName') ? project.property('autoVersionName').toString() : "5.1"
+        
+        resValue "string", "app_name", "Arish Eggs"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.4.3'
+    }
+}
+
 dependencies {
+    // مكتبات الواجهة والتصميم
     implementation 'androidx.core:core-ktx:1.10.0'
     implementation 'androidx.activity:activity-compose:1.7.2'
     implementation platform('androidx.compose:compose-bom:2023.05.01')
@@ -7,10 +47,10 @@ dependencies {
     implementation "androidx.compose.material:material-icons-extended"
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
     
-    // المكتبة التي كانت ناقصة وتسببت في الخطأ:
+    // المكتبة التي تحل مشكلة "Unresolved reference: compose"
     implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1"
 
-    // محرك قاعدة البيانات (الحفظ الدائم)
+    // محرك الحفظ الدائم (Room) - لضمان عدم ضياع الداتا
     implementation "androidx.room:room-runtime:2.5.2"
     implementation "androidx.room:room-ktx:2.5.2"
     annotationProcessor "androidx.room:room-compiler:2.5.2"
