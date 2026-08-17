@@ -2,7 +2,8 @@
 package com.arish.eggs
 
 import android.os.Bundle
-import android.content.*
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,13 +26,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.room.* // تم إصلاح مشكلة Unresolved reference: Entity
+// استيرادات صريحة لحل مشكلة Unresolved reference
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import androidx.room.Dao
+import androidx.room.Query
+import androidx.room.Insert
+import androidx.room.Update
+import androidx.room.Delete
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.room.OnConflictStrategy
 import kotlinx.coroutines.*
 import java.util.*
 
 // --- 1. قاعدة البيانات (هيكل v20 المستقر) ---
 
-@Entity(tableName = "arish_v20_table")
+@Entity(tableName = "arish_final_table_v20")
 data class Transaction(
     @PrimaryKey val id: Long, 
     var farm: String,
@@ -41,7 +53,7 @@ data class Transaction(
 )
 
 @Dao interface TransactionDao {
-    @Query("SELECT * FROM arish_v20_table ORDER BY id DESC")
+    @Query("SELECT * FROM arish_final_table_v20 ORDER BY id DESC")
     fun getAll(): List<Transaction>
     @Insert(onConflict = OnConflictStrategy.REPLACE) fun insert(tr: Transaction)
     @Update fun update(tr: Transaction)
@@ -49,20 +61,28 @@ data class Transaction(
 }
 
 @Database(entities = [Transaction::class], version = 20, exportSchema = false)
-abstract class ArishDatabase : RoomDatabase() { abstract fun dao(): TransactionDao }
+abstract class ArishDatabase : RoomDatabase() { 
+    abstract fun dao(): TransactionDao 
+}
 
-// --- 2. المحرك المحاسبي المحمي لتابلت v60 ---
+// --- 2. المحرك المحاسبي المحمي ---
 
 class ArishLogic(val context: Context) {
     var db: ArishDatabase? = null
     val transactions = mutableStateListOf<Transaction>()
     val farms = listOf("فايز الطويلة", "فايز البرشا", "فايز الألفين", "ابو حمدو العقيد", "ابو حمدو جديدة", "ابو حمدو الاخرس", "ام نضال ١", "ام نضال ٢")
-    val farmInitialBirds = mapOf("فايز الطويلة" to 7500, "فايز البرشا" to 2800, "فايز الألفين" to 2000, "ابو حمدو العقيد" to 2000, "ابو حمدو جديدة" to 3300, "ابو حمدو الاخرس" to 3800, "ام نضال ١" to 10900)
+    val farmInitialBirds = mapOf(
+        "فايز الطويلة" to 7500, "فايز البرشا" to 2800, "فايز الألفين" to 2000,
+        "ابو حمدو العقيد" to 2000, "ابو حمدو جديدة" to 3300, "ابو حمدو الاخرس" to 3800,
+        "ام نضال ١" to 10900, "ام نضال ٢" to 0
+    )
 
     fun startEngine() {
         try {
-            db = Room.databaseBuilder(context, ArishDatabase::class.java, "arish_v20_final.db")
-                .allowMainThreadQueries().fallbackToDestructiveMigration().build()
+            db = Room.databaseBuilder(context, ArishDatabase::class.java, "arish_v20_final_stable.db")
+                .allowMainThreadQueries()
+                .fallbackToDestructiveMigration()
+                .build()
             load()
         } catch (e: Exception) { }
     }
@@ -102,7 +122,6 @@ class MainActivity : ComponentActivity() {
         val logic = ArishLogic(applicationContext)
         setContent { 
             MaterialTheme {
-                // الانتظار ثانية واحدة قبل تشغيل القاعدة لضمان عدم الانهيار عند الشعار
                 LaunchedEffect(Unit) {
                     delay(1000)
                     logic.startEngine()
@@ -120,9 +139,9 @@ fun MainApp(logic: ArishLogic) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("منتجات نهر اسطوان", color = Color.White, fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = navy),
+            CenterAlignedTopAppBar(
+                title = { Text("منتجات نهر اسطوان المحاسبي", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = navy),
                 actions = {
                     IconButton(onClick = { 
                         val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/aichaallouche100-bit/ArishApp/actions"))
@@ -193,11 +212,12 @@ fun LiveGrid(logic: ArishLogic) {
     }
 }
 
-// تم تصحيح تعريف HeaderCell لتعمل داخل RowScope بشكل صحيح
+// تصحيح دالة HeaderCell لتكون تابعة لـ RowScope
 @Composable fun RowScope.HeaderCell(t: String, w: Float) = Text(t, Modifier.weight(w).padding(4.dp), Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
 @Composable fun SummaryScreen(l: ArishLogic) {
     LazyColumn(Modifier.padding(16.dp)) {
+        item { Text("خلاصة المزارع", style = MaterialTheme.typography.headlineSmall, color = Color(0xFF0D47A1), fontWeight = FontWeight.Bold) }
         items(l.farms) { f -> 
             val s = l.getStats(f)
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), elevation = CardDefaults.cardElevation(4.dp)) {
