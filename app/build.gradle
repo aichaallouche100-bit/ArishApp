@@ -6,7 +6,7 @@ android {
     namespace 'com.arish.eggs'
     compileSdk 33
     defaultConfig {
-        applicationId "com.arish.eggs"
+        applicationId "com.arish.eggs.v14"
         minSdk 24
         targetSdk 33
         // الحل الجذري لاستقبال رقم الإصدار تلقائياً
