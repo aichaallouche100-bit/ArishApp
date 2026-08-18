@@ -33,7 +33,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope // الاستيراد المفقود
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -44,10 +44,10 @@ import java.text.SimpleDateFormat
 import java.io.IOException
 import java.util.*
 
-// --- 1. الذاكرة الدائمة (DataStore) ---
-private val Context.dataStore by preferencesDataStore(name = "arish_eggs_v32")
+// --- 1. إعداد مخزن البيانات (DataStore) لضمان الحفظ الدائم ---
+private val Context.dataStore by preferencesDataStore(name = "arish_eggs_v32_final")
 
-// --- 2. نماذج البيانات (Models) ---
+// --- 2. نموذج البيانات (Models) ---
 data class Transaction(
     val id: Long = System.currentTimeMillis(),
     var date: String,
@@ -57,24 +57,25 @@ data class Transaction(
     var price: Double,
     var notes: String = ""
 ) {
+    // معادلة المدخول: =IF(OR(C3="بيض تحميل"; C3="مدخول"); D3*E3; 0)
     val incomeVal: Double get() = if (category == "بيض تحميل" || category == "مدخول") qty * price else 0.0
+    // معادلة المصروف: =IF(OR(ISNUMBER(SEARCH("بيض"; C3)); ISNUMBER(SEARCH("مدخول"; C3))); 0; D3*E3)
     val expenseVal: Double get() = if (category.contains("بيض") || category == "مدخول") 0.0 else qty * price
 }
 
 data class FarmConfig(val name: String, var initialBirds: Int)
 
-// --- 3. المحرك المحاسبي الذكي (ViewModel) ---
+// --- 3. المحرك المحاسبي والمنطقي (ViewModel) ---
 class ArishViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val gson = Gson()
-    private val DATA_KEY = stringPreferencesKey("master_data_v32")
+    private val DATA_KEY = stringPreferencesKey("arish_data_master")
     
     val transactions = mutableStateListOf<Transaction>()
     val farms = mutableStateListOf<FarmConfig>()
-    var globalNotes by mutableStateOf("")
 
     init {
-        // تحميل المزارع الافتراضية
+        // تحميل المزارع الـ 8 الأساسية
         farms.addAll(listOf(
             FarmConfig("فايز الطويلة", 7500), FarmConfig("فايز البرشا", 2800),
             FarmConfig("فايز الألفين", 2000), FarmConfig("ابو حمدو العقيد", 2000),
@@ -133,7 +134,7 @@ class ArishViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-// --- 4. الواجهة الرسومية ---
+// --- 4. واجهة المستخدم (UI) ---
 
 @Composable
 fun ArishTheme(content: @Composable () -> Unit) {
@@ -158,8 +159,11 @@ fun MainNavigation(vm: ArishViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ARISH EGGS", color = Color.White, fontWeight = FontWeight.Black) },
-                actions = { Image(painter = painterResource(id = R.drawable.logo_arish), contentDescription = null, modifier = Modifier.size(45.dp).padding(4.dp)) },
+                title = { Text(text = "ARISH EGGS", color = Color.White, fontWeight = FontWeight.Black) },
+                actions = { 
+                    // اللوغو في الزاوية اليمنى
+                    Image(painter = painterResource(id = R.drawable.logo_arish), contentDescription = null, modifier = Modifier.size(50.dp).padding(4.dp)) 
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = navy)
             )
         },
@@ -211,7 +215,7 @@ fun DailyMovementScreen(vm: ArishViewModel) {
                     OutputCell(String.format("%.1f", tr.incomeVal), 80.dp, Color(0xFF2E7D32))
                     IconButton(onClick = { vm.deleteRow(tr) }) { Icon(Icons.Default.Delete, null, tint = Color.LightGray) }
                 }
-                Divider()
+                HorizontalDivider(color = Color.LightGray, thickness = 0.5.dp)
             }
         }
     }
@@ -221,7 +225,7 @@ fun DailyMovementScreen(vm: ArishViewModel) {
 fun FarmPicker(tr: Transaction, vm: ArishViewModel) {
     var exp by remember { mutableStateOf(false) }
     Box(Modifier.width(120.dp).border(0.5.dp, Color.LightGray).clickable { exp = true }.padding(8.dp)) {
-        Text(tr.farm, fontSize = 10.sp)
+        Text(text = tr.farm, fontSize = 10.sp) // تم التصحيح هنا
         DropdownMenu(expanded = exp, onDismissRequest = { exp = false }) {
             (vm.farms.map { it.name } + "عام" + "أخرى").forEach { f ->
                 DropdownMenuItem(text = { Text(f) }, onClick = { tr.farm = f; vm.saveData(); exp = false })
@@ -235,7 +239,7 @@ fun CategoryPicker(tr: Transaction, vm: ArishViewModel) {
     var exp by remember { mutableStateOf(false) }
     val cats = listOf("بيض انتاج", "بيض تحميل", "علف", "super", "أخرى")
     Box(Modifier.width(100.dp).border(0.5.dp, Color.LightGray).clickable { exp = true }.padding(8.dp)) {
-        Text(tr.category, fontSize = 10.sp)
+        Text(text = tr.category, fontSize = 10.sp) // تم التصحيح هنا
         DropdownMenu(expanded = exp, onDismissRequest = { exp = false }) {
             cats.forEach { c -> DropdownMenuItem(text = { Text(c) }, onClick = { tr.category = c; vm.saveData(); exp = false }) }
         }
@@ -254,19 +258,19 @@ fun SummaryScreen(vm: ArishViewModel) {
                 val s = vm.getFarmSummary(f.name)
                 Row(Modifier.background(Color.White)) {
                     DataCell(f.name, 120.dp, FontWeight.Bold)
-                    DataCell(s["exp"].toString(), 100.dp, color = Color.Red)
-                    DataCell(s["inc"].toString(), 100.dp, color = Color(0xFF2E7D32))
+                    DataCell(s["exp"].toString(), 100.dp, Color.Red)
+                    DataCell(s["inc"].toString(), 100.dp, Color(0xFF2E7D32))
                     DataCell(s["profit"].toString(), 100.dp, FontWeight.ExtraBold)
-                    DataCell(s["eggs"].toString(), 100.dp, color = Color.Blue)
+                    DataCell(s["eggs"].toString(), 100.dp, Color.Blue)
                     DataCell(s["birds"].toString(), 100.dp)
                 }
-                Divider()
+                HorizontalDivider()
             }
             item {
                 Row(Modifier.background(Color(0xFFE3F2FD))) {
                     DataCell("العام (سوبر)", 120.dp, FontWeight.Bold)
                     DataCell("-", 100.dp); DataCell("-", 100.dp); DataCell("-", 100.dp); DataCell("-", 100.dp)
-                    DataCell(String.format("%.2f", vm.getSuperStock()), 100.dp, color = Color(0xFFE65100))
+                    DataCell(String.format("%.2f", vm.getSuperStock()), 100.dp, Color(0xFFE65100), FontWeight.Bold)
                 }
             }
         }
@@ -276,7 +280,7 @@ fun SummaryScreen(vm: ArishViewModel) {
 @Composable
 fun ConstantsScreen(vm: ArishViewModel) {
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("إدارة المزارع والطيور", style = MaterialTheme.typography.titleLarge)
+        Text("إدارة المزارع والطيور", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         vm.farms.forEach { f ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                 Text(f.name, Modifier.width(120.dp))
@@ -285,17 +289,18 @@ fun ConstantsScreen(vm: ArishViewModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        Text("ملاحظات محاسبية:", FontWeight.Bold)
+        Text("ملاحظات الوحدات:", fontWeight = FontWeight.Bold)
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)), modifier = Modifier.fillMaxWidth()) {
             Text("• طن علف = 20 كيس.\n• 1 كيس سوبر لكل 20 كيس علف.\n• صندوق = 12 كرتونة.", modifier = Modifier.padding(16.dp))
         }
     }
 }
 
+// دالات مساعدة للتصميم
 @Composable fun HeaderCell(t: String, w: androidx.compose.ui.unit.Dp) = Text(t, Modifier.width(w).padding(8.dp), Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 @Composable fun EditableCell(v: String, w: androidx.compose.ui.unit.Dp, onVal: (String) -> Unit) {
     var t by remember { mutableStateOf(v) }
     BasicTextField(value = t, onValueChange = { t = it; onVal(it) }, modifier = Modifier.width(w).border(0.5.dp, Color.LightGray).padding(8.dp), textStyle = TextStyle(fontSize = 11.sp))
 }
-@Composable fun OutputCell(v: String, w: androidx.compose.ui.unit.Dp, c: Color) = Text(v, Modifier.width(w).border(0.5.dp, Color.LightGray).padding(8.dp), c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-@Composable fun DataCell(t: String, w: androidx.compose.ui.unit.Dp, fw: FontWeight = FontWeight.Normal, color: Color = Color.Black) = Text(t, Modifier.width(w).padding(8.dp), color, fontSize = 11.sp, fontWeight = fw)
+@Composable fun OutputCell(v: String, w: androidx.compose.ui.unit.Dp, c: Color) = Text(text = v, modifier = Modifier.width(w).border(0.5.dp, Color.LightGray).padding(8.dp), color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+@Composable fun DataCell(t: String, w: androidx.compose.ui.unit.Dp, color: Color = Color.Black, fw: FontWeight = FontWeight.Normal) = Text(text = t, modifier = Modifier.width(w).padding(8.dp), color = color, fontSize = 11.sp, fontWeight = fw)
