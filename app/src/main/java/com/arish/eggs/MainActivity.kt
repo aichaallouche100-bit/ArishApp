@@ -40,7 +40,7 @@ import java.io.IOException
 import java.util.*
 
 // --- 1. إعداد التخزين ---
-private val Context.dataStore by preferencesDataStore(name = "arish_eggs_v34_final")
+private val Context.dataStore by preferencesDataStore(name = "arish_eggs_v35_final")
 
 // --- 2. نماذج البيانات ---
 data class Transaction(
@@ -52,9 +52,8 @@ data class Transaction(
     var price: Double = 0.0,
     var notes: String = ""
 ) {
-    val isIncome: Boolean get() = category == "بيض تحميل" || category == "مدخول"
-    val incomeVal: Double get() = if (isIncome) qty * price else 0.0
-    val expenseVal: Double get() = if (category.contains("بيض") || category == "مدخول") 0.0 else qty * price
+    val incomeVal: Double get() = if (category == "بيض تحميل" || category == "مدخول") qty * price else 0.0
+    val expenseVal: Double get() = if (category.contains("بيض") || category.contains("مدخول")) 0.0 else qty * price
 }
 
 data class FarmConfig(val id: String = UUID.randomUUID().toString(), var name: String, var birds: Int)
@@ -63,28 +62,27 @@ data class FarmConfig(val id: String = UUID.randomUUID().toString(), var name: S
 class ArishViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val gson = Gson()
-    private val DATA_KEY = stringPreferencesKey("arish_data_v34")
+    private val KEY = stringPreferencesKey("arish_master_v35")
     
     val transactions = mutableStateListOf<Transaction>()
     val farms = mutableStateListOf<FarmConfig>()
     var notepad by mutableStateOf("")
 
     init {
-        val defaults = listOf("فايز الطويلة", "فايز البرشا", "فايز الألفين", "ابو حمدو العقيد", "ابو حمدو جديدة", "ابو حمدو الاخرس", "ام نضال ١", "ام نضال ٢")
+        val names = listOf("فايز الطويلة", "فايز البرشا", "فايز الألفين", "ابو حمدو العقيد", "ابو حمدو جديدة", "ابو حمدو الاخرس", "ام نضال ١", "ام نضال ٢")
         val birds = listOf(7500, 2800, 2000, 2000, 3300, 3800, 10900, 0)
-        defaults.forEachIndexed { i, name -> farms.add(FarmConfig(name = name, birds = birds[i])) }
+        names.forEachIndexed { i, n -> farms.add(FarmConfig(name = n, birds = birds[i])) }
         loadAll()
     }
 
     private fun loadAll() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val prefs = context.dataStore.data.catch { if (it is IOException) emit(emptyPreferences()) else throw it }.first()
-                val json = prefs[DATA_KEY] ?: ""
+                val prefs = context.dataStore.data.catch { emit(emptyPreferences()) }.first()
+                val json = prefs[KEY] ?: ""
                 if (json.isNotEmpty()) {
-                    val type = object : TypeToken<Map<String, Any>>() {}.type
-                    val data: Map<String, Any> = gson.fromJson(json, type)
-                    // استعادة البيانات برمجياً هنا
+                    val data: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
+                    // استعادة البيانات برمجياً
                 }
             } catch (e: Exception) { }
         }
@@ -93,7 +91,7 @@ class ArishViewModel(application: Application) : AndroidViewModel(application) {
     fun saveData() {
         viewModelScope.launch(Dispatchers.IO) {
             val json = gson.toJson(mapOf("tr" to transactions.toList(), "f" to farms.toList(), "note" to notepad))
-            context.dataStore.edit { it[DATA_KEY] = json }
+            context.dataStore.edit { it[KEY] = json }
         }
     }
 
@@ -103,20 +101,21 @@ class ArishViewModel(application: Application) : AndroidViewModel(application) {
         saveData()
     }
 
+    fun deleteRow(tr: Transaction) { transactions.remove(tr); saveData() }
+
     fun getSuperStock(): Double {
-        val totalSuper = transactions.filter { it.category == "super" }.sumOf { it.qty }
-        val totalFeed = transactions.filter { it.category == "علف" }.sumOf { it.qty }
-        return totalSuper - (totalFeed / 20.0)
+        val s = transactions.filter { it.category == "super" }.sumOf { it.qty }
+        val f = transactions.filter { it.category == "علف" }.sumOf { it.qty }
+        return s - (f / 20.0)
     }
 
     fun getFarmSummary(fName: String): Map<String, Double> {
         val m = transactions.filter { it.farm == fName }
-        val inc = m.sumOf { it.incomeVal }
-        val exp = m.sumOf { it.expenseVal }
+        val inc = m.sumOf { it.incomeVal }; val exp = m.sumOf { it.expenseVal }
         val deaths = m.filter { it.category == "وفيات" }.sumOf { it.qty }
         val eggStock = m.filter { it.category == "بيض انتاج" }.sumOf { it.qty } - m.filter { it.category == "بيض تحميل" }.sumOf { it.qty }
         val initial = farms.find { it.name == fName }?.birds?.toDouble() ?: 0.0
-        return mapOf("inc" to inc, "exp" to exp, "profit" to (inc-exp), "eggs" to eggStock, "birds" to (initial-deaths))
+        return mapOf("inc" to inc, "exp" to exp, "profit" to (inc - exp), "birds" to (initial - deaths), "eggs" to eggStock)
     }
 }
 
@@ -126,51 +125,48 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val vm: ArishViewModel = viewModel()
-            MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF0D47A1), secondary = Color(0xFFD4AF37))) {
-                MainLayout(vm)
-            }
+            ArishTheme { MainContent(vm) }
         }
     }
 }
 
 @Composable
-fun MainLayout(vm: ArishViewModel) {
+fun MainContent(vm: ArishViewModel) {
     var tab by rememberSaveable { mutableStateOf(0) }
     val navy = Color(0xFF0D47A1)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "ARISH EGGS", fontWeight = FontWeight.Black, color = Color.White) },
-                actions = { Image(painter = painterResource(id = R.drawable.logo_arish), contentDescription = null, modifier = Modifier.size(50.dp).padding(end = 8.dp)) },
+                title = { Text(text = "ARISH EGGS", color = Color.White, fontWeight = FontWeight.Black) },
+                actions = { Image(painter = painterResource(id = R.drawable.logo_arish), contentDescription = null, modifier = Modifier.size(50.dp).padding(4.dp)) },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = navy)
             )
         },
         bottomBar = {
             NavigationBar(containerColor = navy) {
-                val menu = listOf("الحركة اليومية", "الملخص", "الثوابت")
+                val menu = listOf("الحركة", "الملخص", "الثوابت")
                 val icons = listOf(Icons.Default.ReceiptLong, Icons.Default.Analytics, Icons.Default.Settings)
-                menu.forEachIndexed { i, label ->
-                    NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icons[i], null, tint = if(tab==i) Color.Yellow else Color.White) }, label = { Text(label, color = Color.White, fontSize = 10.sp) })
+                menu.forEachIndexed { i, l ->
+                    NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icons[i], null, tint = if (tab == i) Color.Yellow else Color.White) }, label = { Text(text = l, color = Color.White, fontSize = 10.sp) })
                 }
             }
         }
     ) { p ->
         Box(Modifier.padding(p).fillMaxSize().background(Color(0xFFF1F3F4))) {
             when (tab) {
-                0 -> MovementGrid(vm)
-                1 -> SummaryGrid(vm)
-                2 -> ConstantsGrid(vm)
+                0 -> MovementScreen(vm)
+                1 -> SummaryScreen(vm)
+                2 -> ConstantsScreen(vm)
             }
         }
     }
 }
 
 @Composable
-fun MovementGrid(vm: ArishViewModel) {
+fun MovementScreen(vm: ArishViewModel) {
     var search by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
-
     Column(Modifier.fillMaxSize().padding(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(value = search, onValueChange = { search = it }, placeholder = { Text("بحث...") }, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(25.dp), leadingIcon = { Icon(Icons.Default.Search, null) })
@@ -179,20 +175,20 @@ fun MovementGrid(vm: ArishViewModel) {
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.background(Color(0xFF455A64)).fillMaxWidth().horizontalScroll(scroll)) {
-            HeaderCell("التاريخ", 100.dp); HeaderCell("المزرعة", 130.dp); HeaderCell("الصنف", 110.dp)
-            HeaderCell("الكمية", 80.dp); HeaderCell("السعر", 80.dp); HeaderCell("مصروف", 90.dp); HeaderCell("مدخول", 90.dp); HeaderCell("ملاحظات", 160.dp)
+            HeaderCell("التاريخ", 100.dp); HeaderCell("المزرعة", 135.dp); HeaderCell("الصنف", 115.dp)
+            HeaderCell("كمية", 75.dp); HeaderCell("سعر", 75.dp); HeaderCell("مصروف", 85.dp); HeaderCell("مدخول", 85.dp); HeaderCell("ملاحظات", 165.dp)
         }
         LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(vm.transactions.filter { it.farm.contains(search) || it.date.contains(search) }) { idx, tr ->
                 Row(Modifier.fillMaxWidth().horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
                     EditableCell(tr.date, 100.dp) { tr.date = it; vm.saveData() }
-                    DynamicPicker(tr.farm, 130.dp, vm.farms.map { it.name } + listOf("عام", "أخرى")) { tr.farm = it; vm.saveData() }
-                    DynamicPicker(tr.category, 110.dp, listOf("بيض انتاج", "بيض تحميل", "علف", "super", "مدخول", "أخرى")) { tr.category = it; vm.saveData() }
-                    EditableCell(tr.qty.toString(), 80.dp, true) { tr.qty = it.toDoubleOrNull() ?: 0.0; vm.saveData() }
-                    EditableCell(tr.price.toString(), 80.dp, true) { tr.price = it.toDoubleOrNull() ?: 0.0; vm.saveData() }
-                    DataCell(String.format("%.0f", tr.expenseVal), 90.dp, Color.Red)
-                    DataCell(String.format("%.0f", tr.incomeVal), 90.dp, Color(0xFF2E7D32))
-                    EditableCell(tr.notes, 160.dp) { tr.notes = it; vm.saveData() }
+                    DynamicPicker(tr.farm, 135.dp, vm.farms.map { it.name } + listOf("عام", "أخرى")) { tr.farm = it; vm.saveData() }
+                    DynamicPicker(tr.category, 115.dp, listOf("بيض انتاج", "بيض تحميل", "علف", "super", "مدخول", "أخرى")) { tr.category = it; vm.saveData() }
+                    EditableCell(tr.qty.toString(), 75.dp, true) { tr.qty = it.toDoubleOrNull() ?: 0.0; vm.saveData() }
+                    EditableCell(tr.price.toString(), 75.dp, true) { tr.price = it.toDoubleOrNull() ?: 0.0; vm.saveData() }
+                    DataCell(String.format("%.0f", tr.expenseVal), 85.dp, color = Color.Red, fw = FontWeight.Bold)
+                    DataCell(String.format("%.0f", tr.incomeVal), 85.dp, color = Color(0xFF2E7D32), fw = FontWeight.Bold)
+                    EditableCell(tr.notes, 165.dp) { tr.notes = it; vm.saveData() }
                     IconButton(onClick = { vm.addRow(idx + 1) }) { Icon(Icons.Default.AddCircle, null, tint = Color(0xFFD4AF37)) }
                     IconButton(onClick = { vm.deleteRow(tr) }) { Icon(Icons.Default.Delete, null, tint = Color.LightGray) }
                 }
@@ -203,34 +199,32 @@ fun MovementGrid(vm: ArishViewModel) {
 }
 
 @Composable
-fun SummaryGrid(vm: ArishViewModel) {
+fun SummaryScreen(vm: ArishViewModel) {
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxSize().padding(8.dp).horizontalScroll(scroll)) {
         Row(Modifier.background(Color(0xFF455A64))) {
-            HeaderCell("المزرعة", 130.dp); HeaderCell("المصروف", 100.dp); HeaderCell("المدخول", 100.dp)
-            HeaderCell("الربح", 100.dp); HeaderCell("البيض", 100.dp); HeaderCell("الطيور", 100.dp)
+            HeaderCell("المزرعة", 130.dp); HeaderCell("المصروف", 95.dp); HeaderCell("المدخول", 95.dp)
+            HeaderCell("الربح", 95.dp); HeaderCell("البيض", 95.dp); HeaderCell("الطيور", 95.dp)
         }
         LazyColumn {
             items(vm.farms) { f ->
                 val s = vm.getFarmSummary(f.name)
-                SummaryRow(f.name, s)
-            }
-            item { SummaryRow("عام", vm.getFarmSummary("عام"), true) }
-            item {
-                Row(Modifier.background(Color(0xFFFFF9C4))) {
-                    DataCell("مخزون SUPER", 130.dp, fw = FontWeight.Bold)
-                    repeat(3) { DataCell("-", 100.dp) }
-                    DataCell(String.format("%.2f", vm.getSuperStock()), 100.dp, color = Color(0xFFE65100), fw = FontWeight.Bold)
-                    DataCell("-", 100.dp)
+                Row(Modifier.background(Color.White)) {
+                    DataCell(f.name, 130.dp, fw = FontWeight.Bold)
+                    DataCell(s["exp"].toString(), 95.dp, color = Color.Red)
+                    DataCell(s["inc"].toString(), 95.dp, color = Color(0xFF2E7D32))
+                    DataCell(s["profit"].toString(), 95.dp, fw = FontWeight.ExtraBold)
+                    DataCell(s["eggs"].toString(), 95.dp, color = Color.Blue)
+                    DataCell(s["birds"].toString(), 95.dp)
                 }
+                Divider()
             }
             item {
-                Row(Modifier.background(Color.LightGray)) {
-                    DataCell("المجموع الكلي", 130.dp, fw = FontWeight.Bold)
-                    val totalProfit = vm.farms.sumOf { vm.getFarmSummary(it.name)["profit"] ?: 0.0 }
-                    DataCell("-", 100.dp); DataCell("-", 100.dp)
-                    DataCell(totalProfit.toString(), 100.dp, fw = FontWeight.Bold)
-                    repeat(2) { DataCell("-", 100.dp) }
+                Row(Modifier.background(Color(0xFFE3F2FD))) {
+                    DataCell("العام (سوبر)", 130.dp, fw = FontWeight.Bold)
+                    repeat(3) { DataCell("-", 95.dp) }
+                    DataCell(String.format("%.2f", vm.getSuperStock()), 95.dp, color = Color(0xFFE65100), fw = FontWeight.Bold)
+                    DataCell("-", 95.dp)
                 }
             }
         }
@@ -238,50 +232,33 @@ fun SummaryGrid(vm: ArishViewModel) {
 }
 
 @Composable
-fun SummaryRow(name: String, s: Map<String, Double>, isGen: Boolean = false) {
-    Row(Modifier.background(if(isGen) Color(0xFFE3F2FD) else Color.White)) {
-        DataCell(name, 130.dp, fw = FontWeight.Bold)
-        DataCell(s["exp"].toString(), 100.dp, color = Color.Red)
-        DataCell(s["inc"].toString(), 100.dp, color = Color(0xFF2E7D32))
-        DataCell(s["profit"].toString(), 100.dp, fw = FontWeight.ExtraBold)
-        DataCell(s["eggs"].toString(), 100.dp, color = Color.Blue)
-        DataCell(s["birds"].toString(), 100.dp)
-    }
-    Divider()
-}
-
-@Composable
-fun ConstantsGrid(vm: ArishViewModel) {
+fun ConstantsScreen(vm: ArishViewModel) {
     var nName by remember { mutableStateOf("") }
-    var nBirds by remember { mutableStateOf("") }
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("إدارة المزارع والطيور", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(text = "إدارة المزارع والطيور", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(value = nName, onValueChange = { nName = it }, label = { Text("الاسم") }, modifier = Modifier.weight(1f))
-            OutlinedTextField(value = nBirds, onValueChange = { nBirds = it }, label = { Text("الطيور") }, modifier = Modifier.weight(0.6f))
-            Button(onClick = { if(nName.isNotEmpty()) { vm.farms.add(FarmConfig(name = nName, birds = nBirds.toIntOrNull() ?: 0)); vm.saveData() } }) { Text("+") }
+            OutlinedTextField(value = nName, onValueChange = { nName = it }, label = { Text("مزرعة جديدة") }, modifier = Modifier.weight(1f))
+            Button(onClick = { if(nName.isNotEmpty()) { vm.farms.add(FarmConfig(name = nName, birds = 0)); vm.saveData() } }) { Text("+") }
         }
         vm.farms.forEach { f ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(f.name, Modifier.weight(1f))
-                var bText by remember { mutableStateOf(f.birds.toString()) }
-                BasicTextField(value = bText, onValueChange = { bText = it; f.birds = it.toIntOrNull() ?: 0; vm.saveData() }, modifier = Modifier.width(70.dp).border(0.5.dp, Color.Gray).padding(4.dp))
+                Text(text = f.name, modifier = Modifier.weight(1f))
+                var bT by remember { mutableStateOf(f.birds.toString()) }
+                BasicTextField(value = bT, onValueChange = { bT = it; f.birds = it.toIntOrNull() ?: 0; vm.saveData() }, modifier = Modifier.width(75.dp).border(0.5.dp, Color.Gray).padding(4.dp))
                 IconButton(onClick = { vm.farms.remove(f); vm.saveData() }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
             }
         }
-        Spacer(Modifier.height(20.dp))
-        Text("المفكرة المفتوحة:", fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(20.dp)); Text(text = "المفكرة المفتوحة:", fontWeight = FontWeight.Bold)
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4))) {
             Column(Modifier.padding(12.dp)) {
-                Text("علف: (كيس)؛ طن=20 كيس\nسوبر: كيس لكل 20 علف\nبيض: صندوق=12 كرتونة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Divider(Modifier.padding(vertical = 8.dp))
-                BasicTextField(value = vm.notepad, onValueChange = { vm.notepad = it; vm.saveData() }, modifier = Modifier.fillMaxWidth().height(150.dp))
+                Text(text = "طن علف=20 كيس | صندوق=12 كرتونة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                BasicTextField(value = vm.notepad, onValueChange = { vm.notepad = it; vm.saveData() }, modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 8.dp))
             }
         }
     }
 }
 
-// دالات مساعدة
+// دالات التصميم المساعدة
 @Composable fun HeaderCell(t: String, w: Dp) = Text(text = t, modifier = Modifier.width(w).padding(8.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 @Composable fun DataCell(t: String, w: Dp, color: Color = Color.Black, fw: FontWeight = FontWeight.Normal) = Text(text = t, modifier = Modifier.width(w).padding(8.dp), color = color, fontSize = 11.sp, fontWeight = fw)
 @Composable fun EditableCell(v: String, w: Dp, isNum: Boolean = false, onVal: (String) -> Unit) {
@@ -290,16 +267,14 @@ fun ConstantsGrid(vm: ArishViewModel) {
 }
 @Composable fun DynamicPicker(current: String, w: Dp, options: List<String>, onSelect: (String) -> Unit) {
     var exp by remember { mutableStateOf(false) }
-    var isManual by remember { mutableStateOf(false) }
-    var manualText by remember { mutableStateOf("") }
-    if (isManual) {
-        BasicTextField(value = manualText, onValueChange = { manualText = it; onSelect(it) }, modifier = Modifier.width(w).border(0.5.dp, Color(0xFF0D47A1)).padding(8.dp), textStyle = TextStyle(fontSize = 10.sp))
-    } else {
-        Box(Modifier.width(w).border(0.5.dp, Color.LightGray).clickable { exp = true }.padding(8.dp)) {
-            Text(text = current, fontSize = 10.sp)
-            DropdownMenu(expanded = exp, onDismissRequest = { exp = false }) {
-                options.forEach { opt -> DropdownMenuItem(text = { Text(opt) }, onClick = { if(opt == "أخرى") isManual = true else onSelect(opt); exp = false }) }
-            }
+    var isM by remember { mutableStateOf(false) }
+    var mT by remember { mutableStateOf("") }
+    if (isM) BasicTextField(value = mT, onValueChange = { mT = it; onSelect(it) }, modifier = Modifier.width(w).border(0.5.dp, Color.Blue).padding(8.dp), textStyle = TextStyle(fontSize = 10.sp))
+    else Box(Modifier.width(w).border(0.5.dp, Color.LightGray).clickable { exp = true }.padding(8.dp)) {
+        Text(text = current, fontSize = 10.sp)
+        DropdownMenu(expanded = exp, onDismissRequest = { exp = false }) {
+            options.forEach { o -> DropdownMenuItem(text = { Text(o) }, onClick = { if (o == "أخرى") isM = true else onSelect(o); exp = false }) }
         }
     }
 }
+@Composable fun ArishTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF0D47A1), secondary = Color(0xFFD4AF37)), content = content)
